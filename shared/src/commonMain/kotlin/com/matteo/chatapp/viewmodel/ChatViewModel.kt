@@ -41,6 +41,8 @@ class ChatViewModel(
     private val notifications: MessageNotificationSink = MessageNotificationSink { },
     private val localStore: com.matteo.chatapp.repository.ChatLocalStore = object : com.matteo.chatapp.repository.ChatLocalStore {}
 ) : ViewModel() {
+    suspend fun refreshAttachment(message: Message): Message = chatRepository.refreshMessage(message.id)
+
 
     private val _conversationState = MutableStateFlow(ChatConversationUiState())
     val conversationState: StateFlow<ChatConversationUiState> = _conversationState.asStateFlow()
@@ -673,7 +675,11 @@ class ChatViewModel(
         }
     }
 
+    private var blockedUserIds: Set<String> = emptySet()
+    fun setBlockedUserIds(ids: Set<String>) { blockedUserIds = ids }
+
     private fun applyPersonalMessage(message: Message) {
+        if (message.senderId in blockedUserIds && !message.deleted) return
         val dmId = message.dmId ?: return
         if (message.deleted || message.edited) {
             if (activeConversation == ConversationTarget.DirectMessage(dmId)) applyMessageChange(message)

@@ -1,5 +1,6 @@
 package com.matteo.chatapp.platform
 
+import kotlinx.coroutines.ensureActive
 import java.awt.Desktop
 import java.awt.FileDialog
 import java.awt.Frame
@@ -7,16 +8,54 @@ import java.io.File
 import java.net.URI
 import java.nio.file.Files
 
-actual suspend fun pickAttachmentFile(): PickedAttachmentFile? {
-    val dialog = FileDialog(null as Frame?, "Seleccionar archivo", FileDialog.LOAD)
-    dialog.isVisible = true
-    val directory = dialog.directory ?: return null
-    val fileName = dialog.file ?: return null
-    val file = File(directory, fileName)
-    if (!file.isFile || file.length() <= 0 || file.length() > 25L * 1024L * 1024L) return null
-    val contentType = detectContentType(file) ?: return null
-    return PickedAttachmentFile(file.name, contentType, Files.readAllBytes(file.toPath()))
+actual suspend fun pickAttachmentFile(): PickedAttachmentFile? = pickDesktopAttachment(false)
+actual suspend fun pickPhotoAttachment(): PickedAttachmentFile? = pickDesktopAttachment(true)
+
+private suspend fun pickDesktopAttachment(photo: Boolean): PickedAttachmentFile? {
+    val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val dialog = FileDialog(null as Frame?, if (photo) "Seleccionar imagen" else "Seleccionar archivo", FileDialog.LOAD)
+        if (photo) {
+            dialog.directory = File(System.getProperty("user.home"), "Pictures").path
+            dialog.setFilenameFilter { _, name -> name.substringAfterLast('.').lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif") }
+        }
+        try {
+            dialog.isVisible = true
+            dialog.file?.let { File(dialog.directory, it) }
+        } finally { dialog.dispose() }
+    } ?: return null
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        require(file.isFile && file.length() > 0) { "No se puede leer el archivo" }
+        require(file.length() <= MAX_ATTACHMENT_BYTES) { "El archivo supera el límite de 25 MB" }
+        val contentType = detectContentType(file) ?: error("Formato de archivo no compatible")
+        require(!photo || contentType.startsWith("image/")) { "Selecciona una imagen" }
+        PickedAttachmentFile(file.name, contentType, file.inputStream().use { it.readAttachmentBytes() })
+    }
 }
+
+actual suspend fun saveAttachment(url: String, fileName: String): Boolean {
+    val target = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val dialog = FileDialog(null as Frame?, "Guardar archivo", FileDialog.SAVE)
+        dialog.file = attachmentSaveName(fileName)
+        try {
+            dialog.isVisible = true
+            dialog.file?.let { File(dialog.directory, it).toPath() }
+        } finally { dialog.dispose() }
+    } ?: return false
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val bytes = downloadAttachmentBytes(url)
+        val temporary = Files.createTempFile(target.toAbsolutePath().parent, ".chimera-", ".download")
+        try {
+            Files.write(temporary, bytes)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            try { Files.move(temporary, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
+            catch (_: java.nio.file.AtomicMoveNotSupportedException) { Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
+            true
+        } finally { Files.deleteIfExists(temporary) }
+    }
+}
+
+actual fun supportsCurrentLocation(): Boolean = false
+actual suspend fun currentLocation(): SharedLocation = error("Introduce las coordenadas del lugar que quieras compartir")
 
 actual fun openExternalUrl(url: String) {
     if (Desktop.isDesktopSupported()) Desktop.getDesktop().browse(URI(url))

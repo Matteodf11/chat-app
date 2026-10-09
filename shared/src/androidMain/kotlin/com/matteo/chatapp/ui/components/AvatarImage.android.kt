@@ -49,7 +49,8 @@ actual fun AvatarImage(
             bitmap = image,
             contentDescription = "$name avatar",
             modifier = imageModifier,
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.High
         )
     } else {
         Box(

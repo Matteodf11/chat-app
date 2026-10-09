@@ -73,7 +73,8 @@ internal data class ChatAreaState(
     val avatarUrl: String? = null,
     val online: Boolean? = null,
     val typingText: String? = null,
-    val highlightedMessageId: String? = null
+    val highlightedMessageId: String? = null,
+    val canMessage: Boolean = true
 )
 
 internal data class ChatAreaActions(
@@ -90,7 +91,10 @@ internal data class ChatAreaActions(
     val onRefresh: () -> Unit,
     val onBack: (() -> Unit)? = null,
     val onSearch: (() -> Unit)? = null,
-    val onProfileClick: (() -> Unit)? = null
+    val onProfileClick: (() -> Unit)? = null,
+    val onOpenImage: (Message) -> Unit = {},
+    val onDownload: (Message) -> Unit = {},
+    val onSendLocation: (String) -> Unit = {}
 )
 
 @Composable
@@ -131,7 +135,9 @@ internal fun ChatArea(
     var isRecordingVoice by remember(destinationKey) { mutableStateOf(false) }
     var recordingSeconds by remember(destinationKey) { mutableStateOf(0) }
     var recordingError by remember(destinationKey) { mutableStateOf<String?>(null) }
-    val canSend = (messageInput.isNotBlank() || pendingAttachment != null) && !isUploadingAttachment && !isRecordingVoice
+    var attachmentMenu by remember(destinationKey) { mutableStateOf(false) }
+    var locationDialog by remember(destinationKey) { mutableStateOf(false) }
+    val canSend = state.canMessage && (messageInput.isNotBlank() || pendingAttachment != null) && !isUploadingAttachment && !isRecordingVoice
     val sendColor by animateColorAsState(if (canSend) Primary else SurfaceVariant, tween(120))
     val sendCurrent = {
         val attachment = pendingAttachment
@@ -139,6 +145,15 @@ internal fun ChatArea(
             onSendAttachment(attachment) { if (pendingAttachment === attachment) pendingAttachment = null }
         } else {
             onSend()
+        }
+    }
+    if (locationDialog) LocationShareDialog(onDismiss = { locationDialog = false }, onSend = { if (state.canMessage) actions.onSendLocation(it) })
+    LaunchedEffect(state.canMessage) {
+        if (!state.canMessage) {
+            cancelVoiceRecording()
+            isRecordingVoice = false
+            attachmentMenu = false
+            locationDialog = false
         }
     }
     DisposableEffect(destinationKey) {
@@ -221,11 +236,11 @@ internal fun ChatArea(
             }
         }
         HorizontalDivider(color = Outline)
-        if (!state.isConnected || state.isSyncing || state.loadError != null) {
+        if (state.loadError != null) {
             Row(Modifier.fillMaxWidth().background(SurfaceVariant).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text(state.loadError ?: if (state.isSyncing) "Actualizando mensajes…" else "Reconectando…",
-                    modifier = Modifier.weight(1f), color = if (state.loadError != null) Error else Muted, fontSize = 12.sp)
+                Text(state.loadError,
+                    modifier = Modifier.weight(1f), color = Error, fontSize = 12.sp)
                 TextButton(onClick = actions.onRefresh, enabled = !state.isSyncing) { Text("Reintentar") }
             }
         }
@@ -270,7 +285,9 @@ internal fun ChatArea(
                         },
                         onEdit = { content -> onEditMessage(message.id, content) },
                         onDelete = { onDeleteMessage(message.id) },
-                        highlighted = message.id == highlightedMessageId
+                        highlighted = message.id == highlightedMessageId,
+                        onOpenImage = actions.onOpenImage, onDownload = actions.onDownload,
+                        allowEdit = state.canMessage
                     )
                 }
             }
@@ -290,7 +307,7 @@ internal fun ChatArea(
                         } else {
                             Text(pending.error ?: "No se pudo confirmar el envío", color = Error, fontSize = 12.sp)
                             Row {
-                                TextButton(onClick = { actions.onRetryMessage(pending.id) }) { Text("Reintentar") }
+                                TextButton(enabled = state.canMessage, onClick = { actions.onRetryMessage(pending.id) }) { Text("Reintentar") }
                                 TextButton(onClick = { actions.onDiscardMessage(pending.id) }) { Text("Descartar") }
                             }
                         }
@@ -334,6 +351,7 @@ internal fun ChatArea(
                 }
             }
         }
+        if (!state.canMessage) Text("No puedes enviar mensajes en esta conversación", color = Muted, modifier = Modifier.padding(12.dp))
         if (pendingAttachment != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().background(SurfaceVariant).padding(horizontal = 20.dp, vertical = 9.dp),
@@ -378,7 +396,7 @@ internal fun ChatArea(
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = onInputChange,
-                enabled = !isRecordingVoice,
+                enabled = state.canMessage && !isRecordingVoice,
                 placeholder = { Text("Escribe un mensaje", color = Muted) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -408,12 +426,28 @@ internal fun ChatArea(
             )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Box {
             IconButton(
-                onClick = { scope.launch { pickAttachmentFile()?.let { pendingAttachment = it } } },
-                enabled = !isUploadingAttachment && !isRecordingVoice,
+                onClick = { attachmentMenu = true },
+                enabled = state.canMessage && !isUploadingAttachment && !isRecordingVoice,
                 modifier = Modifier.size(48.dp)
             ) {
                 Icon(Icons.Rounded.AttachFile, contentDescription = "Adjuntar archivo", tint = OnSurface)
+            }
+            DropdownMenu(expanded = attachmentMenu, onDismissRequest = { attachmentMenu = false }) {
+                listOf("Galería", "Archivo", "Ubicación").forEachIndexed { index, label ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                        attachmentMenu = false
+                        if (index == 2) locationDialog = true else scope.launch {
+                            try {
+                                val file = if (index == 0) com.matteo.chatapp.platform.pickPhotoAttachment() else pickAttachmentFile()
+                                file?.let { pendingAttachment = it }; recordingError = null
+                            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (e: Exception) { recordingError = e.message ?: "No se pudo abrir el archivo" }
+                        }
+                    })
+                }
+            }
             }
             Spacer(Modifier.weight(1f))
             IconButton(
@@ -440,7 +474,7 @@ internal fun ChatArea(
                         }
                     }
                 },
-                enabled = !isUploadingAttachment,
+                enabled = state.canMessage && !isUploadingAttachment,
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(14.dp))

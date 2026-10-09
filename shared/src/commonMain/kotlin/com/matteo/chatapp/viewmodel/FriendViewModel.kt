@@ -37,6 +37,9 @@ class FriendViewModel(
     private var presenceEventsJob: Job? = null
     private var profileEventsJob: Job? = null
     private var friendEventsCollectJob: Job? = null
+    private var contactsCollectJob: Job? = null
+    private var contactsConnectionJob: Job? = null
+    private var contactActionJob: Job? = null
     private var presenceEventsCollectJob: Job? = null
     private var profileEventsCollectJob: Job? = null
     private var profileOperationJob: Job? = null
@@ -99,6 +102,26 @@ class FriendViewModel(
         }
     }
 
+    fun blockUser(id: String) = contactAction { friendRepository.blockUser(id) }
+    fun unblockUser(id: String) = contactAction { friendRepository.unblockUser(id) }
+    fun removeFriend(id: String) = contactAction { friendRepository.removeFriend(id) }
+    private fun contactAction(action: suspend () -> Unit) {
+        if (_uiState.value.contactActionLoading) return
+        _uiState.update { it.copy(contactActionLoading = true, error = null) }
+        loadAllJob?.cancel()
+        contactActionJob = viewModelScope.launch {
+            try {
+                action()
+                val snapshot = friendRepository.loadSnapshot()
+                _uiState.update { it.copy(friends = snapshot.friends, pendingRequests = snapshot.pendingRequests,
+                    dms = snapshot.dms, blockedUsers = snapshot.blockedUsers,
+                    selectedDm = it.selectedDm?.let { selected -> snapshot.dms.find { dm -> dm.id == selected.id } }) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.update { it.copy(error = e.message ?: "No se pudo completar la acción") } }
+            finally { _uiState.update { it.copy(contactActionLoading = false) } }
+        }
+    }
+
     fun loadAll() {
         loadAllJob?.cancel()
         loadAllJob = viewModelScope.launch {
@@ -109,6 +132,8 @@ class FriendViewModel(
                         friends = snapshot.friends,
                         pendingRequests = snapshot.pendingRequests,
                         dms = snapshot.dms,
+                        blockedUsers = snapshot.blockedUsers,
+                        selectedDm = it.selectedDm?.let { selected -> snapshot.dms.find { dm -> dm.id == selected.id } },
                         error = null
                     )
                 }
@@ -123,6 +148,8 @@ class FriendViewModel(
     private fun connectFriendEvents() {
         if (friendEventsJob != null) return
 
+        contactsConnectionJob = viewModelScope.launch { friendshipEventsSource.connected.collect { if (it) loadAll() } }
+        contactsCollectJob = viewModelScope.launch { friendshipEventsSource.contactsChanged.collect { loadAll() } }
         friendEventsCollectJob = viewModelScope.launch {
             friendshipEventsSource.events.collect { event ->
                 applyFriendshipEvent(event.type, event.friendship)
@@ -371,6 +398,9 @@ class FriendViewModel(
         presenceEventsJob?.cancel()
         profileEventsJob?.cancel()
         friendEventsCollectJob?.cancel()
+        contactsCollectJob?.cancel()
+        contactsConnectionJob?.cancel()
+        contactActionJob?.cancel()
         presenceEventsCollectJob?.cancel()
         profileEventsCollectJob?.cancel()
         friendshipEventsSource.disconnect()

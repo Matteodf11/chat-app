@@ -5,12 +5,29 @@ import com.matteo.chatapp.model.FriendRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 
 class FriendApi(private val client: HttpClient) {
+    suspend fun getBlockedUsers(token: String): List<com.matteo.chatapp.model.BlockedUser> = try {
+        client.get("$BASE_URL/api/friends/blocked") { bearerAuth(token) }.bodyOrApiError()
+    } catch (e: ApiException) {
+        // Keep existing contacts available during a staggered client/server rollout.
+        if (e.statusCode == 404) emptyList() else throw e
+    }
+    suspend fun blockUser(id: String, token: String) {
+        client.put("$BASE_URL/api/friends/block/$id") { bearerAuth(token) }.requireApiSuccess()
+    }
+    suspend fun unblockUser(id: String, token: String) {
+        client.delete("$BASE_URL/api/friends/block/$id") { bearerAuth(token) }.requireApiSuccess()
+    }
+    suspend fun removeFriend(id: String, token: String) {
+        client.delete("$BASE_URL/api/friends/user/$id") { bearerAuth(token) }.requireApiSuccess()
+    }
+
 
     suspend fun getFriends(token: String): List<FriendRequest> {
         return client.get("$BASE_URL/api/friends") {

@@ -8,6 +8,8 @@ import com.matteo.chatapp.model.UserProfile
 
 data class FriendUiState(
     val friends: List<FriendRequest> = emptyList(),
+    val blockedUsers: List<com.matteo.chatapp.model.BlockedUser> = emptyList(),
+    val contactActionLoading: Boolean = false,
     val pendingRequests: List<FriendRequest> = emptyList(),
     val dms: List<DmConversation> = emptyList(),
     val selectedDm: DmConversation? = null,

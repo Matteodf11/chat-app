@@ -51,7 +51,8 @@ actual fun AvatarImage(
             bitmap = image,
             contentDescription = "$name avatar",
             modifier = baseModifier,
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.High
         )
     } else {
         AvatarFallback(name = name, size = size, modifier = baseModifier)

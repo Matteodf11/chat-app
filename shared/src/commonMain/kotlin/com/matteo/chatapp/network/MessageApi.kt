@@ -20,6 +20,8 @@ import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 
 class MessageApi(private val client: HttpClient) {
+    suspend fun getMessage(id: String, token: String): Message =
+        client.get("$BASE_URL/api/messages/$id") { bearerAuth(token) }.bodyOrApiError()
     suspend fun sharedItems(dmId: String, kind: String, before: String?, token: String): com.matteo.chatapp.model.SharedItemsPage =
         client.get("$BASE_URL/api/messages/dm/$dmId/shared") {
             bearerAuth(token)

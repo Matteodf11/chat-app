@@ -48,7 +48,10 @@ fun MessageItem(
     onReplyClick: (String) -> Unit,
     onEdit: (String) -> Unit,
     onDelete: () -> Unit,
-    highlighted: Boolean = false
+    highlighted: Boolean = false,
+    onOpenImage: (Message) -> Unit = {},
+    onDownload: (Message) -> Unit = {},
+    allowEdit: Boolean = true
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -120,7 +123,13 @@ fun MessageItem(
                     )
                 }
             }
-            if (message.content.isNotBlank()) {
+            val location = com.matteo.chatapp.platform.sharedLocationFromMessage(message.content)
+            if (location != null) {
+                OutlinedButton(onClick = { openExternalUrl(location.mapUrl) }) {
+                    Column { Text("Ubicación compartida"); Text("Ver en el mapa", fontSize = 12.sp) }
+                }
+            }
+            if (message.content.isNotBlank() && location == null) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = buildAnnotatedString {
@@ -138,7 +147,7 @@ fun MessageItem(
             }
             if (message.attachmentName != null) {
                 Spacer(Modifier.height(7.dp))
-                AttachmentCard(message)
+                AttachmentCard(message, onOpenImage, onDownload)
             }
             if (message.edited && !canModify) {
                 Text(text = "Editado", color = Muted, fontSize = 10.sp)
@@ -161,7 +170,13 @@ fun MessageItem(
                             onReply()
                         }
                     )
-                    if (message.content.isNotBlank()) {
+                    val location = com.matteo.chatapp.platform.sharedLocationFromMessage(message.content)
+            if (location != null) {
+                OutlinedButton(onClick = { openExternalUrl(location.mapUrl) }) {
+                    Column { Text("Ubicación compartida"); Text("Ver en el mapa", fontSize = 12.sp) }
+                }
+            }
+            if (message.content.isNotBlank() && location == null) {
                         DropdownMenuItem(
                             text = { Text("Copiar") },
                             leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
@@ -171,7 +186,7 @@ fun MessageItem(
                             }
                         )
                     }
-                    if (canModify && message.content.isNotBlank()) {
+                    if (canModify && allowEdit && message.content.isNotBlank()) {
                         DropdownMenuItem(
                             text = { Text("Editar") },
                             leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
@@ -239,9 +254,21 @@ fun MessageItem(
 }
 
 @Composable
-private fun AttachmentCard(message: Message) {
+private fun AttachmentCard(message: Message, onOpenImage: (Message) -> Unit, onDownload: (Message) -> Unit) {
+    if (message.attachmentContentType?.startsWith("image/") == true) {
+        Column(Modifier.widthIn(max = 360.dp).fillMaxWidth().background(SurfaceVariant, MaterialTheme.shapes.medium)) {
+            SharedMediaThumbnail(message.attachmentUrl, message.attachmentName,
+                Modifier.fillMaxWidth().height(220.dp).clickable(enabled = message.attachmentUrl != null) { onOpenImage(message) }, maxEdge = 1024)
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(message.attachmentName ?: "Imagen", color = OnBackground, maxLines = 1,
+                    modifier = Modifier.weight(1f), overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                IconButton(onClick = { onDownload(message) }) { Icon(Icons.Rounded.Download, "Guardar imagen", tint = Primary) }
+            }
+        }
+        return
+    }
     if (message.attachmentContentType?.startsWith("audio/") == true && message.attachmentUrl != null) {
-        VoiceNoteCard(message)
+        Column { VoiceNoteCard(message); TextButton(onClick = { onDownload(message) }) { Text("Guardar audio") } }
         return
     }
     val url = message.attachmentUrl
@@ -250,7 +277,7 @@ private fun AttachmentCard(message: Message) {
             .fillMaxWidth()
             .widthIn(max = 420.dp)
             .background(SurfaceVariant, MaterialTheme.shapes.small)
-            .clickable(enabled = url != null) { url?.let(::openExternalUrl) }
+            .clickable(enabled = url != null) { onDownload(message) }
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -260,7 +287,7 @@ private fun AttachmentCard(message: Message) {
             Text(message.attachmentName ?: "Archivo", color = OnBackground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Text(formatFileSize(message.attachmentSize), color = Muted, fontSize = 11.sp)
         }
-        Icon(Icons.Rounded.Download, contentDescription = "Abrir archivo", tint = if (url != null) OnSurface else Muted)
+        Icon(Icons.Rounded.Download, contentDescription = "Guardar archivo", tint = if (url != null) OnSurface else Muted)
     }
 }
 

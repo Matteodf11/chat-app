@@ -45,6 +45,8 @@ class WebSocketClient(private val client: HttpClient) {
     private val _typingEvents = MutableSharedFlow<TypingEvent>()
     val typingEvents: SharedFlow<TypingEvent> = _typingEvents
 
+    private val _contactsChanged = MutableSharedFlow<Unit>()
+    val contactsChanged: SharedFlow<Unit> = _contactsChanged
     private val _friendshipEvents = MutableSharedFlow<FriendshipEvent>()
     val friendshipEvents: SharedFlow<FriendshipEvent> = _friendshipEvents
 
@@ -96,8 +98,9 @@ class WebSocketClient(private val client: HttpClient) {
     }
 
     suspend fun connectFriendEvents(token: String, userId: String? = null) {
-        connectEvents(token, "friends", listOfNotNull("/user/queue/friends", userId?.let { "/topic/friends.$it" })) { _, body ->
-            _friendshipEvents.emit(decoder.decodeFromString<FriendshipEvent>(body))
+        connectEvents(token, "friends", listOfNotNull("/user/queue/contacts", "/user/queue/friends", userId?.let { "/topic/friends.$it" })) { subscription, body ->
+            if (subscription == "friends-0") _contactsChanged.emit(Unit)
+            else _friendshipEvents.emit(decoder.decodeFromString<FriendshipEvent>(body))
         }
     }
 

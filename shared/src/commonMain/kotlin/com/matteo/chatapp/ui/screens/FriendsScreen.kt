@@ -42,7 +42,7 @@ fun FriendsScreen(
 
     var searchUsername by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("En línea", "Todos", "Pendientes", "Añadir")
+    val tabs = listOf("En línea", "Todos", "Pendientes", "Añadir", "Bloqueados")
 
     LaunchedEffect(Unit) {
         viewModel.loadAll()
@@ -99,6 +99,16 @@ fun FriendsScreen(
                 onAccept = { viewModel.acceptRequest(it) },
                 onReject = { viewModel.rejectRequest(it) }
             )
+            4 -> LazyColumn(Modifier.fillMaxSize().padding(18.dp)) {
+                if (state.blockedUsers.isEmpty()) item { Text("No tienes usuarios bloqueados", color = Muted, modifier = Modifier.padding(16.dp)) }
+                items(state.blockedUsers, key = { it.id }) { user ->
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        com.matteo.chatapp.ui.components.AvatarImage(user.avatarUrl, user.username, 40)
+                        Text(user.username, color = OnBackground, modifier = Modifier.weight(1f).padding(12.dp))
+                        TextButton(enabled = !state.contactActionLoading, onClick = { viewModel.unblockUser(user.id) }) { Text("Desbloquear") }
+                    }
+                }
+            }
             3 -> AddFriendTab(
                 searchUsername = searchUsername,
                 onSearchChange = { searchUsername = it },

@@ -12,6 +12,7 @@ internal object AndroidPlatform {
         context = activity.applicationContext
         AndroidProfileImagePicker.initialize(activity)
         AndroidAttachmentFilePicker.initialize(activity)
+        AndroidAttachmentActions.initialize(activity)
         AndroidVoiceRecorder.initialize(activity)
     }
 

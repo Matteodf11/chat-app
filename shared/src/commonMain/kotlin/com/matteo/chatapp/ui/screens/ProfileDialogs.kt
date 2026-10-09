@@ -357,8 +357,17 @@ private fun ProfilePreviewCard(
 internal fun PublicProfileDialog(
     profile: UserProfile,
     onDismiss: () -> Unit,
-    onSharedItems: (() -> Unit)? = null
+    onSharedItems: (() -> Unit)? = null,
+    isFriend: Boolean = false,
+    blocked: Boolean = false,
+    canManage: Boolean = true,
+    busy: Boolean = false,
+    actionError: String? = null,
+    onRemoveFriend: () -> Unit = {},
+    onBlock: () -> Unit = {},
+    onUnblock: () -> Unit = {}
 ) {
+    var confirmAction by remember(profile.id) { mutableStateOf<String?>(null) }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = 640.dp)
@@ -399,6 +408,14 @@ internal fun PublicProfileDialog(
                         Text(bio, color = OnBackground, fontSize = 14.sp, lineHeight = 22.sp)
                     }
                 }
+                if (canManage) {
+                    actionError?.let { Text(it, color = Error, fontSize = 13.sp) }
+                    if (blocked) OutlinedButton(enabled = !busy, onClick = onUnblock, modifier = Modifier.fillMaxWidth()) { Text("Desbloquear usuario") }
+                    else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isFriend) TextButton(enabled = !busy, onClick = { confirmAction = "remove" }, modifier = Modifier.weight(1f)) { Text("Eliminar amigo") }
+                        TextButton(enabled = !busy, onClick = { confirmAction = "block" }, modifier = Modifier.weight(1f)) { Text("Bloquear", color = Error) }
+                    }
+                }
                 onSharedItems?.let { open ->
                     OutlinedButton(onClick = open, modifier = Modifier.fillMaxWidth()) {
                         Text("Archivos y enlaces compartidos")
@@ -414,6 +431,15 @@ internal fun PublicProfileDialog(
             }
         }
     }
+    confirmAction?.let { action ->
+        AlertDialog(onDismissRequest = { confirmAction = null },
+            title = { Text(if (action == "block") "Bloquear a ${profile.username}" else "Eliminar de amigos") },
+            text = { Text(if (action == "block") "No podréis enviaros mensajes privados ni solicitudes de amistad. Se conservará el historial y se eliminará la amistad. Los servidores compartidos siguen siendo accesibles."
+                else "Se conservará el historial. Podréis volver a enviaros una solicitud de amistad.") },
+            confirmButton = { TextButton(enabled = !busy, onClick = { if (action == "block") onBlock() else onRemoveFriend(); confirmAction = null }) { Text("Confirmar") } },
+            dismissButton = { TextButton(onClick = { confirmAction = null }) { Text("Cancelar") } })
+    }
+
 }
 
 private fun profileMembershipDate(timestamp: String?): String? {

@@ -23,6 +23,7 @@ data class MessageSearchQuery(
 )
 
 interface ChatRepository {
+    suspend fun refreshMessage(id: String): Message = getMessageContext(id).messages.first { it.id == id }
     suspend fun sharedItems(dmId: String, kind: String, before: String?): com.matteo.chatapp.model.SharedItemsPage =
         error("Galería no disponible")
     suspend fun loadMessages(
@@ -67,6 +68,14 @@ class NetworkChatRepository(
     private val friendApi: FriendApi,
     private val accessTokenProvider: AccessTokenProvider
 ) : ChatRepository {
+    override suspend fun refreshMessage(id: String): Message {
+        val token = accessTokenProvider.requireToken()
+        return try { messageApi.getMessage(id, token) }
+        catch (e: com.matteo.chatapp.network.ApiException) {
+            if (e.statusCode != 404) throw e
+            messageApi.getMessageContext(id, token).messages.first { it.id == id }
+        }
+    }
     override suspend fun sharedItems(dmId: String, kind: String, before: String?) =
         messageApi.sharedItems(dmId, kind, before, accessTokenProvider.requireToken())
     override suspend fun markDmReadThrough(dmId: String, messageId: String) {

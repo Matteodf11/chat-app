@@ -20,7 +20,8 @@ internal fun sharedLinks(content: String): List<String> = Regex("https?://[^\\s<
 
 @Composable
 internal fun SharedItemsDialog(state: SharedItemsUiState, onTab: (String) -> Unit,
-    onMore: () -> Unit, onDismiss: () -> Unit) {
+    onMore: () -> Unit, onDismiss: () -> Unit,
+    onOpenImage: (com.matteo.chatapp.model.Message) -> Unit, onDownload: (com.matteo.chatapp.model.Message) -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.extraLarge, color = Surface,
             modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().heightIn(max = 680.dp)) {
@@ -51,7 +52,7 @@ internal fun SharedItemsDialog(state: SharedItemsUiState, onTab: (String) -> Uni
                                 } else {
                                     Row(verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.fillMaxWidth().clickable(enabled = message.attachmentUrl != null) {
-                                            message.attachmentUrl?.let(::openExternalUrl)
+                                            if (message.attachmentContentType?.startsWith("image/") == true) onOpenImage(message) else onDownload(message)
                                         }) {
                                         if (message.attachmentContentType?.startsWith("image/") == true) {
                                             com.matteo.chatapp.ui.components.SharedMediaThumbnail(message.attachmentUrl,
@@ -61,7 +62,7 @@ internal fun SharedItemsDialog(state: SharedItemsUiState, onTab: (String) -> Uni
                                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Text(message.attachmentName ?: "Archivo", color = OnBackground,
                                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                            Text(if (message.attachmentUrl != null) "Abrir · ${message.attachmentContentType.orEmpty()}"
+                                            Text(if (message.attachmentUrl != null) "${if (message.attachmentContentType?.startsWith("image/") == true) "Ver imagen" else "Guardar archivo"} · ${message.attachmentContentType.orEmpty()}"
                                                 else "Archivo no disponible", style = MaterialTheme.typography.bodySmall, color = Muted)
                                         }
                                     }

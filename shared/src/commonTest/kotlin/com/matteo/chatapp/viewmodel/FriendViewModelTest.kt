@@ -35,6 +35,53 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FriendViewModelTest {
+    @Test fun failedBlockingKeepsTheFriendAndAllowsRetry() = runViewModelTest {
+        val friend = friendship("relation", "friend")
+        val repository = FakeFriendRepository(snapshot = FriendSnapshot(listOf(friend), emptyList(), emptyList()))
+        repository.contactHandler = { throw ApiException("No se pudo bloquear", 503) }
+        val vm = createViewModel(repository, FakeProfileRepository(profile("me", "Me")))
+        try {
+            advanceUntilIdle()
+            vm.blockUser("friend")
+            advanceUntilIdle()
+            assertEquals(listOf(friend), vm.uiState.value.friends)
+            assertTrue(vm.uiState.value.blockedUsers.isEmpty())
+            assertEquals("No se pudo bloquear", vm.uiState.value.error)
+            assertFalse(vm.uiState.value.contactActionLoading)
+        } finally { vm.disconnectRealtime() }
+    }
+
+    @Test fun blockingWaitsForServerAndUpdatesTheOpenChatWithoutDuplicateActions() = runViewModelTest {
+        val friend = friendship("relation", "friend")
+        val conversation = dm("dm", "friend")
+        val repository = FakeFriendRepository(snapshot = FriendSnapshot(listOf(friend), emptyList(), listOf(conversation)))
+        val completed = CompletableDeferred<Unit>()
+        var calls = 0
+        repository.contactHandler = {
+            calls++
+            completed.await()
+            repository.snapshot = FriendSnapshot(emptyList(), emptyList(), listOf(conversation.copy(canMessage = false)),
+                listOf(com.matteo.chatapp.model.BlockedUser("friend", "Friend")))
+        }
+        val vm = createViewModel(repository, FakeProfileRepository(profile("me", "Me")))
+        try {
+            advanceUntilIdle()
+            vm.selectDm(conversation)
+            vm.blockUser("friend")
+            vm.blockUser("friend")
+            advanceUntilIdle()
+            assertEquals(1, calls)
+            assertTrue(vm.uiState.value.contactActionLoading)
+            assertEquals(listOf(friend), vm.uiState.value.friends)
+            completed.complete(Unit)
+            advanceUntilIdle()
+            assertTrue(vm.uiState.value.friends.isEmpty())
+            assertEquals("friend", vm.uiState.value.blockedUsers.single().id)
+            assertFalse(assertNotNull(vm.uiState.value.selectedDm).canMessage)
+            assertFalse(vm.uiState.value.contactActionLoading)
+        } finally { vm.disconnectRealtime() }
+    }
+
     @Test
     fun passwordChangeShowsServerErrorAndAllowsRetryWithoutDuplicateRequests() = runViewModelTest {
         val response = CompletableDeferred<Unit>()
@@ -176,13 +223,17 @@ private object EmptyAccessTokenProvider : AccessTokenProvider {
 }
 
 private class FakeFriendRepository(
-    private val snapshot: FriendSnapshot = FriendSnapshot(
+    var snapshot: FriendSnapshot = FriendSnapshot(
         friends = emptyList(),
         pendingRequests = emptyList(),
         dms = emptyList()
     ),
     private val openedDm: DmConversation = dm("dm", "friend")
 ) : FriendRepository {
+    var contactHandler: suspend (String) -> Unit = {}
+    override suspend fun blockUser(userId: String) = contactHandler(userId)
+    override suspend fun unblockUser(userId: String) = contactHandler(userId)
+    override suspend fun removeFriend(userId: String) = contactHandler(userId)
     val markedAsRead = mutableListOf<String>()
 
     override suspend fun loadSnapshot(): FriendSnapshot = snapshot

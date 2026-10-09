@@ -29,7 +29,8 @@ data class DmConversation(
     val lastActivityAt: String? = null,
     val pinned: Boolean = false,
     val muted: Boolean = false,
-    val archived: Boolean = false
+    val archived: Boolean = false,
+    val canMessage: Boolean = true
 )
 
 @Serializable
@@ -50,3 +51,6 @@ data class PresenceEvent(
     val username: String,
     val online: Boolean
 )
+
+@Serializable
+data class BlockedUser(val id: String, val username: String, val avatarUrl: String? = null)

@@ -7,6 +7,8 @@ import com.matteo.chatapp.network.WebSocketClient
 import kotlinx.coroutines.flow.Flow
 
 interface FriendshipEventsSource {
+    val contactsChanged: Flow<Unit> get() = kotlinx.coroutines.flow.emptyFlow()
+    val connected: Flow<Boolean> get() = kotlinx.coroutines.flow.emptyFlow()
     val events: Flow<FriendshipEvent>
 
     suspend fun connect(token: String, userId: String)
@@ -34,6 +36,8 @@ class WebSocketFriendshipEventsSource(
     private val client: WebSocketClient
 ) : FriendshipEventsSource {
     override val events: Flow<FriendshipEvent> = client.friendshipEvents
+    override val contactsChanged: Flow<Unit> = client.contactsChanged
+    override val connected: Flow<Boolean> = client.connected
 
     override suspend fun connect(token: String, userId: String) {
         client.connectFriendEvents(token, userId)

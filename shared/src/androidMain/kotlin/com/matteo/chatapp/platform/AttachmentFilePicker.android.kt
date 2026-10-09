@@ -3,6 +3,7 @@ package com.matteo.chatapp.platform
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,16 +14,23 @@ import kotlin.coroutines.resume
 
 internal object AndroidAttachmentFilePicker {
     private var launcher: ActivityResultLauncher<Array<String>>? = null
+    private var photoLauncher: ActivityResultLauncher<PickVisualMediaRequest>? = null
     private var pendingResult: ((Uri?) -> Unit)? = null
 
     fun initialize(activity: ComponentActivity) {
-        launcher = activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            pendingResult?.invoke(uri)
+        photoLauncher = activity.registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            val callback = pendingResult
             pendingResult = null
+            callback?.invoke(uri)
+        }
+        launcher = activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val callback = pendingResult
+            pendingResult = null
+            callback?.invoke(uri)
         }
     }
 
-    suspend fun pick(): PickedAttachmentFile? {
+    suspend fun pick(photo: Boolean = false): PickedAttachmentFile? {
         val uri = suspendCancellableCoroutine<Uri?> { continuation ->
             val activeLauncher = launcher
             if (activeLauncher == null || pendingResult != null) {
@@ -31,15 +39,16 @@ internal object AndroidAttachmentFilePicker {
             }
             pendingResult = { result -> if (continuation.isActive) continuation.resume(result) }
             continuation.invokeOnCancellation { pendingResult = null }
-            activeLauncher.launch(ALLOWED_TYPES.toTypedArray())
+            if (photo) photoLauncher?.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            else activeLauncher.launch(ALLOWED_TYPES.toTypedArray())
         } ?: return null
 
         return withContext(Dispatchers.IO) {
             val resolver = AndroidPlatform.context.contentResolver
             val contentType = resolver.getType(uri)?.lowercase() ?: return@withContext null
-            if (contentType !in ALLOWED_TYPES) return@withContext null
-            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
-            if (bytes.isEmpty() || bytes.size > 25 * 1024 * 1024) return@withContext null
+            require(contentType in ALLOWED_TYPES) { "Formato no compatible. Usa JPG, PNG, WebP o GIF para las imágenes." }
+            val bytes = resolver.openInputStream(uri)?.use { it.readAttachmentBytes() } ?: return@withContext null
+            require(bytes.isNotEmpty()) { "El archivo está vacío" }
             PickedAttachmentFile(displayName(uri) ?: "archivo", contentType, bytes)
         }
     }
@@ -69,3 +78,5 @@ actual fun openExternalUrl(url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     AndroidPlatform.context.startActivity(intent)
 }
+
+actual suspend fun pickPhotoAttachment(): PickedAttachmentFile? = AndroidAttachmentFilePicker.pick(photo = true)

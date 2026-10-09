@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +80,24 @@ fun MainScreen(
     val isLoadingOlder = conversationState.isLoadingOlder
     val messageError = conversationState.error
     val isUploadingAttachment = conversationState.isUploadingAttachment
+    var imageToView by remember { mutableStateOf<com.matteo.chatapp.model.Message?>(null) }
+    var mediaError by remember { mutableStateOf<String?>(null) }
+    var savingAttachment by remember { mutableStateOf(false) }
+    val mediaScope = rememberCoroutineScope()
+    val downloadMedia: (com.matteo.chatapp.model.Message) -> Unit = { message ->
+        if (!savingAttachment) {
+            savingAttachment = true
+            mediaScope.launch {
+                try {
+                    val fresh = chatViewModel.refreshAttachment(message)
+                    val url = fresh.attachmentUrl ?: error("Este archivo ya no está disponible")
+                    com.matteo.chatapp.platform.saveAttachment(url, fresh.attachmentName ?: "archivo")
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { mediaError = e.message ?: "No se pudo guardar el archivo" }
+                finally { savingAttachment = false }
+            }
+        }
+    }
     val friendState by friendViewModel.uiState.collectAsStateWithLifecycle()
     val dmSummaries by chatViewModel.dmSummaries.collectAsStateWithLifecycle()
     val dmPreferences by chatViewModel.dmPreferences.collectAsStateWithLifecycle()
@@ -161,6 +180,7 @@ fun MainScreen(
         selectedChannel?.let { chatViewModel.loadMessages(it.id) }
     }
 
+    LaunchedEffect(friendState.blockedUsers) { chatViewModel.setBlockedUserIds(friendState.blockedUsers.map { it.id }.toSet()) }
     LaunchedEffect(friendState.dms) { chatViewModel.restoreDmSummaries(friendState.dms) }
 
     LaunchedEffect(serverViewModel) {
@@ -239,7 +259,8 @@ fun MainScreen(
         avatarUrl = avatarUrl,
         online = online,
         typingText = typingUsers[typingKey]?.let { "$it esta escribiendo..." },
-        highlightedMessageId = highlightedMessageId
+        highlightedMessageId = highlightedMessageId,
+        canMessage = if (destinationKey.startsWith("dm:")) dms.find { it.id == destinationKey.removePrefix("dm:") }?.canMessage ?: true else true
     )
 
     fun buildChatAreaActions(
@@ -248,6 +269,9 @@ fun MainScreen(
         onBack: (() -> Unit)? = null,
         onProfileClick: (() -> Unit)? = null
     ) = ChatAreaActions(
+        onOpenImage = { imageToView = it },
+        onDownload = downloadMedia,
+        onSendLocation = { onSendText(it, null, {}) },
         onLoadOlder = chatViewModel::loadOlderMessages,
         onRetryMessage = chatViewModel::retryMessage,
         onDiscardMessage = chatViewModel::discardPendingMessage,
@@ -931,11 +955,25 @@ fun MainScreen(
         PublicProfileDialog(
             profile = user,
             onDismiss = { friendViewModel.clearViewedProfile() },
-            onSharedItems = sharedDm?.let { dm -> { chatViewModel.openSharedItems(dm.id) } }
+            onSharedItems = sharedDm?.let { dm -> { chatViewModel.openSharedItems(dm.id) } },
+            isFriend = friends.any { it.friendId == user.id },
+            blocked = friendState.blockedUsers.any { it.id == user.id },
+            canManage = user.id != profile?.id,
+            busy = friendState.contactActionLoading,
+            actionError = friendError,
+            onRemoveFriend = { friendViewModel.removeFriend(user.id) },
+            onBlock = { friendViewModel.blockUser(user.id) },
+            onUnblock = { friendViewModel.unblockUser(user.id) }
         )
     }
     sharedItems.dmId?.let { dmId ->
         SharedItemsDialog(sharedItems, onTab = { chatViewModel.openSharedItems(dmId, it) },
-            onMore = chatViewModel::loadMoreSharedItems, onDismiss = chatViewModel::closeSharedItems)
+            onMore = chatViewModel::loadMoreSharedItems, onDismiss = chatViewModel::closeSharedItems,
+            onOpenImage = { imageToView = it }, onDownload = downloadMedia)
     }
+    imageToView?.let { image -> com.matteo.chatapp.ui.components.ImageViewerDialog(image,
+        refresh = chatViewModel::refreshAttachment, onDownload = downloadMedia, onDismiss = { imageToView = null }) }
+    mediaError?.let { error -> AlertDialog(onDismissRequest = { mediaError = null }, title = { Text("No se pudo guardar") },
+        text = { Text(error) }, confirmButton = { TextButton(onClick = { mediaError = null }) { Text("Aceptar") } }) }
+
 }
