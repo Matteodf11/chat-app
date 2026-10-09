@@ -93,3 +93,26 @@ private val allowedContentTypes = setOf(
     "application/vnd.ms-powerpoint",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
+
+actual fun supportsPhotoCapture(): Boolean = false
+actual suspend fun capturePhoto(): PickedAttachmentFile? = null
+actual suspend fun pickPhotoAttachments(): List<PickedAttachmentFile> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    val dialog = FileDialog(null as Frame?, "Seleccionar fotos", FileDialog.LOAD)
+    dialog.isMultipleMode = true
+    dialog.directory = File(System.getProperty("user.home"), "Pictures").path
+    dialog.setFilenameFilter { _, name -> name.substringAfterLast('.').lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif") }
+    val files = try { dialog.isVisible = true; dialog.files.toList() } finally { dialog.dispose() }
+    if (files.isEmpty()) return@withContext emptyList()
+    require(files.size <= MAX_SELECTED_PHOTOS) { "Puedes seleccionar hasta 10 fotos" }
+    require(files.all { it.isFile && it.length() in 1..MAX_ATTACHMENT_BYTES }) { "Cada foto debe ocupar entre 1 byte y 25 MB" }
+    require(files.sumOf { it.length() } <= MAX_PHOTO_SELECTION_BYTES) { "Las fotos seleccionadas superan 50 MB" }
+    var total = 0L
+    files.map { file ->
+        val type = detectContentType(file) ?: error("Formato de imagen no compatible")
+        require(type.startsWith("image/")) { "Selecciona imágenes" }
+        val bytes = file.inputStream().use { it.readAttachmentBytes() }
+        total += bytes.size
+        require(total <= MAX_PHOTO_SELECTION_BYTES) { "Las fotos seleccionadas superan 50 MB" }
+        PickedAttachmentFile(file.name, type, bytes)
+    }.also(::validatePhotoSelection)
+}

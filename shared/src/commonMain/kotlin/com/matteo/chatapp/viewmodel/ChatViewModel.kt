@@ -231,6 +231,39 @@ class ChatViewModel(
     }
 
     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun sendPhotos(files: List<PickedAttachmentFile>, content: String, replyToId: String?, onQueued: (Boolean) -> Unit) {
+        val target = activeConversation
+        val validation = runCatching {
+            com.matteo.chatapp.platform.validatePhotoSelection(files)
+            require(content.length <= 4000) { "El comentario no puede superar 4000 caracteres" }
+        }.exceptionOrNull()
+        if (validation != null) {
+            _conversationState.update { it.copy(error = validation.message) }
+            onQueued(false)
+            return
+        }
+        if (target == null || stopped || !enqueueingTargets.add(target)) { onQueued(false); return }
+        val pending = files.mapIndexed { index, file ->
+            PendingMessage(kotlin.uuid.Uuid.random().toString(), target, if (index == 0) content.trim() else "",
+                if (index == 0) replyToId else null, file)
+        }
+        viewModelScope.launch {
+            var saved = false
+            try {
+                restored.await()
+                localStore.putBatch(pending)
+                pending.forEach { outbox[it.id] = it }
+                publishPending()
+                saved = true
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { _conversationState.update { it.copy(error = "No se pudieron guardar las fotos. Puedes volver a intentarlo.") } }
+            finally { enqueueingTargets.remove(target) }
+            onQueued(saved)
+            if (saved) pending.forEach { deliverPending(it) }
+        }
+    }
+
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
     private fun enqueue(target: ConversationTarget, content: String, replyToId: String?, file: PickedAttachmentFile?, onQueued: () -> Unit) {
         if (content.isBlank() && file == null) return
         if (content.length > 4000) {
@@ -271,30 +304,32 @@ class ChatViewModel(
     }
 
     private fun deliver(pending: PendingMessage) {
-        viewModelScope.launch {
-            if (stopped) return@launch
-            try {
-                val message = if (pending.file == null) chatRepository.sendMessage(
-                    pending.target, pending.content, pending.replyToId, pending.id
-                ) else chatRepository.sendAttachment(pending.target, pending.file, pending.content, pending.replyToId, pending.id)
-                outbox.remove(pending.id)
-                runCatching { localStore.remove(pending.id) }
-                if (message.dmId != null) applyPersonalMessage(message)
-                if (activeConversation == pending.target) {
-                    appendMessage(message)
-                    _conversationState.update { it.copy(error = null) }
-                    safeSendTyping(channelId = message.channelId, dmId = message.dmId, typing = false)
-                }
-                publishPending()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                outbox[pending.id]?.let {
-                    outbox[pending.id] = it.copy(status = SendStatus.FAILED, error =
-                        if (e is com.matteo.chatapp.network.ApiException) e.message else "No se pudo confirmar el envío")
-                }
-                publishPending()
+        viewModelScope.launch { deliverPending(pending) }
+    }
+
+    private suspend fun deliverPending(pending: PendingMessage) {
+        if (stopped) return
+        try {
+            val message = if (pending.file == null) chatRepository.sendMessage(
+                pending.target, pending.content, pending.replyToId, pending.id
+            ) else chatRepository.sendAttachment(pending.target, pending.file, pending.content, pending.replyToId, pending.id)
+            outbox.remove(pending.id)
+            runCatching { localStore.remove(pending.id) }
+            if (message.dmId != null) applyPersonalMessage(message)
+            if (activeConversation == pending.target) {
+                appendMessage(message)
+                _conversationState.update { it.copy(error = null) }
+                safeSendTyping(channelId = message.channelId, dmId = message.dmId, typing = false)
             }
+            publishPending()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            outbox[pending.id]?.let {
+                outbox[pending.id] = it.copy(status = SendStatus.FAILED, error =
+                    if (e is com.matteo.chatapp.network.ApiException) e.message else "No se pudo confirmar el envío")
+            }
+            publishPending()
         }
     }
 

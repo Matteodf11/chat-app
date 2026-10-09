@@ -10,8 +10,24 @@ data class PickedAttachmentFile(
 
 expect suspend fun pickAttachmentFile(): PickedAttachmentFile?
 expect suspend fun pickPhotoAttachment(): PickedAttachmentFile?
+expect suspend fun pickPhotoAttachments(): List<PickedAttachmentFile>
+expect fun supportsPhotoCapture(): Boolean
+expect suspend fun capturePhoto(): PickedAttachmentFile?
+
+const val MAX_SELECTED_PHOTOS = 10
+const val MAX_PHOTO_SELECTION_BYTES = 50L * 1024 * 1024
+fun validatePhotoSelection(files: List<PickedAttachmentFile>) {
+    require(files.size in 1..MAX_SELECTED_PHOTOS) { "Selecciona entre 1 y 10 fotos" }
+    require(files.all { it.contentType in setOf("image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif") && it.size in 1..(25L * 1024 * 1024) }) {
+        "Usa imágenes JPG, PNG, WebP o GIF de hasta 25 MB"
+    }
+    require(files.sumOf { it.size } <= MAX_PHOTO_SELECTION_BYTES) { "Las fotos seleccionadas superan 50 MB" }
+}
 
 expect suspend fun saveAttachment(url: String, fileName: String): Boolean
+expect fun imageShareActionLabel(): String
+enum class ImageShareResult { CHOOSER_OPENED, COPIED }
+expect suspend fun shareImage(url: String, fileName: String, contentType: String): ImageShareResult
 
 expect fun supportsCurrentLocation(): Boolean
 expect suspend fun currentLocation(): SharedLocation

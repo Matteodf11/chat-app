@@ -31,6 +31,47 @@ class FileChatLocalStoreTest {
     }
 
     @Test
+    fun photoBatchSurvivesRestartAndAcknowledgementsRemoveOnlyTheirPhoto() = runTest {
+        val root = Files.createTempDirectory("chat-photo-batch-test").toFile()
+        try {
+            val store = FileChatLocalStore(root, "account")
+            val photos = (0..2).map { index ->
+                PendingMessage("00000000-0000-0000-0000-00000000000$index",
+                    ConversationTarget.DirectMessage("dm"), if (index == 0) "Comentario" else "", null,
+                    PickedAttachmentFile("$index.jpg", "image/jpeg", byteArrayOf(index.toByte())))
+            }
+            store.putBatch(photos)
+            assertEquals(photos.map { it.id }, FileChatLocalStore(root, "account").pending().map { it.id })
+            store.remove(photos[1].id)
+            val restored = FileChatLocalStore(root, "account").pending()
+            assertEquals(listOf(photos[0].id, photos[2].id), restored.map { it.id })
+            assertEquals("Comentario", restored.first().content)
+            store.remove(photos[0].id)
+            store.remove(photos[2].id)
+            assertTrue(FileChatLocalStore(root, "account").pending().isEmpty())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun failureBeforeBatchCommitDoesNotRestorePartOfTheSelection() = runTest {
+        val root = Files.createTempDirectory("chat-photo-failure-test").toFile()
+        try {
+            val store = FileChatLocalStore(root, "account")
+            store.saveSummaries(emptyMap())
+            val directory = root.listFiles()!!.single()
+            val secondId = "00000000-0000-0000-0000-000000000002"
+            java.io.File(directory, "$secondId.bin").mkdir()
+            val photos = listOf("00000000-0000-0000-0000-000000000001", secondId).map {
+                PendingMessage(it, ConversationTarget.DirectMessage("dm"), "", null,
+                    PickedAttachmentFile("foto.jpg", "image/jpeg", byteArrayOf(1)))
+            }
+            assertFails { store.putBatch(photos) }
+            assertTrue(FileChatLocalStore(root, "account").pending().isEmpty())
+            assertFalse(java.io.File(directory, "${photos[0].id}.bin").exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun atomicReplacementRetainsLatestSummaryAfterRestart() = runTest {
         val root = Files.createTempDirectory("chat-summary-test").toFile()
         try {

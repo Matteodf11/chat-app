@@ -15,6 +15,12 @@ internal actual suspend fun loadRemoteImage(url: String, maxEdge: Int): ImageBit
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
         val bytes = connection.getInputStream().use { it.readAttachmentBytes() }
+        decodePickedImage(bytes, maxEdge)
+    }.getOrNull()
+}
+
+internal actual suspend fun decodePickedImage(bytes: ByteArray, maxEdge: Int): ImageBitmap? = withContext(Dispatchers.IO) {
+    runCatching {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
         require(options.outWidth > 0 && options.outHeight > 0)
@@ -22,6 +28,6 @@ internal actual suspend fun loadRemoteImage(url: String, maxEdge: Int): ImageBit
         while (maxOf(options.outWidth, options.outHeight) / sample > maxEdge) sample *= 2
         options.inJustDecodeBounds = false
         options.inSampleSize = sample
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()?.let { orientPickedImage(it, bytes) }
     }.getOrNull()
 }

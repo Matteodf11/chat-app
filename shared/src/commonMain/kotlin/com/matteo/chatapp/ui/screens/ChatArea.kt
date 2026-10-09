@@ -17,6 +17,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Description
@@ -85,6 +88,7 @@ internal data class ChatAreaActions(
     val onCancelReply: () -> Unit,
     val onInputChange: (String) -> Unit,
     val onSendAttachment: (PickedAttachmentFile, () -> Unit) -> Unit,
+    val onSendPhotos: (List<PickedAttachmentFile>, String, (Boolean) -> Unit) -> Unit,
     val onSend: () -> Unit,
     val onRetryMessage: (String) -> Unit,
     val onDiscardMessage: (String) -> Unit,
@@ -137,6 +141,48 @@ internal fun ChatArea(
     var recordingError by remember(destinationKey) { mutableStateOf<String?>(null) }
     var attachmentMenu by remember(destinationKey) { mutableStateOf(false) }
     var locationDialog by remember(destinationKey) { mutableStateOf(false) }
+    var pendingPhotos by remember(destinationKey) { mutableStateOf<List<PickedAttachmentFile>>(emptyList()) }
+    var fromCamera by remember(destinationKey) { mutableStateOf(false) }
+    var photoWorking by remember(destinationKey) { mutableStateOf(false) }
+    var photoError by remember(destinationKey) { mutableStateOf<String?>(null) }
+    val latestDestination by rememberUpdatedState(destinationKey)
+    val latestCanMessage by rememberUpdatedState(state.canMessage)
+    fun selectPhotos(camera: Boolean) {
+        val target = destinationKey
+        photoWorking = true
+        scope.launch {
+            try {
+                val photos = if (camera) listOfNotNull(com.matteo.chatapp.platform.capturePhoto())
+                    else com.matteo.chatapp.platform.pickPhotoAttachments()
+                if (latestDestination == target && latestCanMessage && photos.isNotEmpty()) {
+                    pendingPhotos = photos
+                    fromCamera = camera
+                    photoError = null
+                    recordingError = null
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                if (pendingPhotos.isEmpty()) recordingError = e.message ?: "No se pudo abrir la foto"
+                else photoError = e.message ?: "No se pudo abrir la cámara"
+            } finally { photoWorking = false }
+        }
+    }
+    if (pendingPhotos.isNotEmpty() && state.canMessage) com.matteo.chatapp.ui.components.PhotoReviewDialog(
+        files = pendingPhotos, initialComment = messageInput, camera = fromCamera, working = photoWorking,
+        error = photoError,
+        onRemove = { index -> pendingPhotos = pendingPhotos.filterIndexed { i, _ -> i != index } },
+        onRetake = { selectPhotos(true) },
+        onDismiss = { pendingPhotos = emptyList(); photoError = null },
+        onSend = { comment ->
+            photoWorking = true
+            photoError = null
+            actions.onSendPhotos(pendingPhotos, comment) { queued ->
+                photoWorking = false
+                if (queued) { pendingPhotos = emptyList(); pendingAttachment = null }
+                else photoError = "No se pudieron guardar las fotos. Vuelve a intentarlo."
+            }
+        }
+    )
     val canSend = state.canMessage && (messageInput.isNotBlank() || pendingAttachment != null) && !isUploadingAttachment && !isRecordingVoice
     val sendColor by animateColorAsState(if (canSend) Primary else SurfaceVariant, tween(120))
     val sendCurrent = {
@@ -154,6 +200,7 @@ internal fun ChatArea(
             isRecordingVoice = false
             attachmentMenu = false
             locationDialog = false
+            pendingPhotos = emptyList()
         }
     }
     DisposableEffect(destinationKey) {
@@ -429,24 +476,34 @@ internal fun ChatArea(
             Box {
             IconButton(
                 onClick = { attachmentMenu = true },
-                enabled = state.canMessage && !isUploadingAttachment && !isRecordingVoice,
+                enabled = state.canMessage && !isUploadingAttachment && !isRecordingVoice && !photoWorking,
                 modifier = Modifier.size(48.dp)
             ) {
                 Icon(Icons.Rounded.AttachFile, contentDescription = "Adjuntar archivo", tint = OnSurface)
             }
             DropdownMenu(expanded = attachmentMenu, onDismissRequest = { attachmentMenu = false }) {
-                listOf("Galería", "Archivo", "Ubicación").forEachIndexed { index, label ->
-                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                if (com.matteo.chatapp.platform.supportsPhotoCapture()) DropdownMenuItem(
+                    text = { Text("Cámara") }, leadingIcon = { Icon(Icons.Rounded.PhotoCamera, null, tint = Primary) },
+                    onClick = { attachmentMenu = false; selectPhotos(true) })
+                DropdownMenuItem(text = { Text("Galería") }, leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null, tint = Primary) },
+                    onClick = { attachmentMenu = false; selectPhotos(false) })
+                DropdownMenuItem(text = { Text("Archivo") }, leadingIcon = { Icon(Icons.Rounded.Description, null, tint = Primary) },
+                    onClick = {
                         attachmentMenu = false
-                        if (index == 2) locationDialog = true else scope.launch {
+                        val target = destinationKey
+                        scope.launch {
                             try {
-                                val file = if (index == 0) com.matteo.chatapp.platform.pickPhotoAttachment() else pickAttachmentFile()
-                                file?.let { pendingAttachment = it }; recordingError = null
+                                val file = pickAttachmentFile()
+                                if (latestDestination == target && latestCanMessage) {
+                                    file?.let { pendingAttachment = it }
+                                    recordingError = null
+                                }
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (e: Exception) { recordingError = e.message ?: "No se pudo abrir el archivo" }
                         }
                     })
-                }
+                DropdownMenuItem(text = { Text("Ubicación") }, leadingIcon = { Icon(Icons.Rounded.LocationOn, null, tint = Primary) },
+                    onClick = { attachmentMenu = false; locationDialog = true })
             }
             }
             Spacer(Modifier.weight(1f))

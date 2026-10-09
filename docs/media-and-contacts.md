@@ -13,6 +13,13 @@ con una URL renovada mediante el backend y comprobación de pertenencia al chat.
 El destino se elige con el diálogo nativo de guardar. Audio y documentos también
 pueden guardarse directamente. Cancelar el selector no envía ni guarda nada.
 
+Las fotos del chat conservan su proporción completa, sin recortes, nombre de archivo
+ni botones bajo la imagen. Guardar y compartir se ofrecen dentro del visor, con
+iconos. Android abre el panel del sistema para compartir el archivo original; en
+PC «Copiar imagen» permite pegarla en otra aplicación. No se comparte la URL privada
+de descarga. Los archivos preparados para compartir se limpian después de 24 horas
+cuando se vuelve a usar esta función.
+
 La ubicación se envía como texto compatible con clientes anteriores y un enlace
 al mapa. Se valida latitud/longitud y se pide confirmación antes de enviarla.
 Android solicita permiso solamente al pulsar «Usar mi ubicación» y obtiene una
@@ -39,3 +46,23 @@ Comprobaciones manuales recomendadas antes de distribuir:
 - Permiso de ubicación concedido, aproximado, denegado y ubicación desactivada.
 - Dos cuentas: bloquear con el otro chat abierto, intentar enviar y desbloquear.
 - PC: ampliar, arrastrar y guardar una imagen; cancelar el diálogo de destino.
+
+
+La opción **Cámara** está disponible en Android: abre la cámara del sistema y usa
+una foto a resolución completa, con vista previa, comentario y botones para
+repetir, quitar o enviar. Cancelar conserva el borrador y un adjunto anterior.
+No solicita permiso de cámara porque la captura la realiza la aplicación del sistema.
+Los archivos temporales se eliminan al regresar; capturas abandonadas se limpian
+al iniciar después de 24 horas.
+
+**Galería** permite seleccionar hasta diez imágenes en Android y PC (25 MB por
+foto y 50 MB en total). La revisión permite escoger miniaturas y quitar imágenes;
+el comentario y la respuesta se incluyen una sola vez, en la primera foto.
+La selección completa se guarda de forma atómica en la cola local antes de
+cerrar la revisión y se sube secuencialmente para mantener el orden. Los fallos
+de subida siguen teniendo reintento manual individual y conservan su identificador.
+Las vistas previas y el visor respetan la orientación EXIF de las fotos JPEG.
+
+Pruebas adicionales en móvil físico: cámara horizontal/vertical, cancelar,
+repetir y cancelar la repetición, galería múltiple, quitar la última imagen,
+volver del selector tras cambiar de conversación y envío con conexión interrumpida.

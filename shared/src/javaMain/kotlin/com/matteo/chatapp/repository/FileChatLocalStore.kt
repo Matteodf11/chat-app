@@ -39,10 +39,31 @@ class FileChatLocalStore(root: File, account: String) : ChatLocalStore {
             message.target.id, message.target is ConversationTarget.DirectMessage, message.content,
             message.replyToId, message.file?.fileName, message.file?.contentType, message.createdAt)).toByteArray())
     }
+    override suspend fun putBatch(messages: List<PendingMessage>) = io {
+        require(messages.isNotEmpty())
+        val created = mutableListOf<File>()
+        try {
+            val entries = messages.map { message ->
+                message.file?.let {
+                    val binary = item(message.id, "bin")
+                    check(!binary.exists() || binary.isFile)
+                    if (!binary.exists()) { created.add(binary); atomic(binary, it.bytes) }
+                }
+                StoredPending(message.id, message.target.id, message.target is ConversationTarget.DirectMessage,
+                    message.content, message.replyToId, message.file?.fileName, message.file?.contentType, message.createdAt)
+            }
+            atomic(File(directory, "batch-${messages.first().id}.json"), json.encodeToString(entries).toByteArray())
+        } catch (e: Exception) { created.forEach { it.delete() }; throw e }
+    }
+
     override suspend fun pending(): List<PendingMessage> = io {
-        directory.listFiles().orEmpty().filter { it.extension == "json" && it.nameWithoutExtension.length == 36 }.mapNotNull { file ->
+        directory.listFiles().orEmpty().filter { it.extension == "json" && (it.nameWithoutExtension.length == 36 || it.name.startsWith("batch-")) }.flatMap { file ->
             runCatching {
-                val entry = json.decodeFromString<StoredPending>(file.readText())
+                if (file.name.startsWith("batch-")) json.decodeFromString<List<StoredPending>>(file.readText())
+                else listOf(json.decodeFromString<StoredPending>(file.readText()))
+            }.getOrDefault(emptyList())
+        }.mapNotNull { entry ->
+            runCatching {
                 PendingMessage(entry.id, if (entry.dm) ConversationTarget.DirectMessage(entry.target)
                     else ConversationTarget.Channel(entry.target), entry.content, entry.replyToId,
                     entry.fileName?.let { PickedAttachmentFile(it, entry.contentType ?: "application/octet-stream", item(entry.id, "bin").readBytes()) },
@@ -52,6 +73,14 @@ class FileChatLocalStore(root: File, account: String) : ChatLocalStore {
     }
     override suspend fun remove(id: String) = io {
         // Remove manifest first: an interrupted cleanup cannot resurrect an acknowledged send.
+        directory.listFiles().orEmpty().filter { it.name.startsWith("batch-") && it.extension == "json" }.forEach { batch ->
+            val entries = runCatching { json.decodeFromString<List<StoredPending>>(batch.readText()) }.getOrNull() ?: return@forEach
+            if (entries.any { it.id == id }) {
+                val remaining = entries.filterNot { it.id == id }
+                if (remaining.isEmpty()) check(batch.delete())
+                else atomic(batch, json.encodeToString(remaining).toByteArray())
+            }
+        }
         val manifest = item(id, "json")
         check(!manifest.exists() || manifest.delete())
         item(id, "bin").delete()

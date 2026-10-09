@@ -14,6 +14,13 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <provider
+            android:name="com.matteo.chatapp.platform.ChimeraFileProvider"
+            android:authorities="${applicationId}.shared-images"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/chimera_shared_paths" />
+        </provider>
         <activity
             android:exported="true"
             android:name=".MainActivity"

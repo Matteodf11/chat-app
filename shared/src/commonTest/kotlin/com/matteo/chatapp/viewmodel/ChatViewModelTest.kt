@@ -398,6 +398,58 @@ class ChatViewModelTest {
         }
     }
 
+    @Test
+    fun photoSelectionIsPersistedTogetherAndSentInOrderWithOnlyOneCaptionAndReply() = runViewModelTest {
+        val saved = mutableListOf<PendingMessage>()
+        val sent = mutableListOf<String>()
+        val gate = CompletableDeferred<Unit>()
+        val store = object : com.matteo.chatapp.repository.ChatLocalStore {
+            override suspend fun putBatch(messages: List<PendingMessage>) { gate.await(); saved.addAll(messages) }
+        }
+        val repository = ChatTestRepository()
+        repository.attachmentHandler = { target, file, text, reply, id ->
+            assertEquals(3, saved.size)
+            assertEquals(ConversationTarget.DirectMessage("dm-1"), target)
+            sent += file.fileName
+            assertEquals(if (sent.size == 1) "Comentario" else "", text)
+            assertEquals(if (sent.size == 1) "reply" else null, reply)
+            chatMessage(id!!, dmId = target.id, content = text)
+        }
+        val vm = createViewModel(repository, localStore = store)
+        var queued: Boolean? = null
+        try {
+            vm.loadDmMessages("dm-1")
+            advanceUntilIdle()
+            vm.sendPhotos((1..3).map { PickedAttachmentFile("$it.jpg", "image/jpeg", byteArrayOf(1)) }, "Comentario", "reply") { queued = it }
+            advanceUntilIdle()
+            assertEquals(null, queued)
+            assertTrue(sent.isEmpty())
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(true, queued)
+            assertEquals(listOf("1.jpg", "2.jpg", "3.jpg"), sent)
+            assertEquals(3, saved.map { it.id }.toSet().size)
+        } finally { vm.disconnectRealtime() }
+    }
+
+    @Test
+    fun failedPhotoBatchSaveRetainsReviewAndDoesNotUpload() = runViewModelTest {
+        val repository = ChatTestRepository()
+        val vm = createViewModel(repository, localStore = object : com.matteo.chatapp.repository.ChatLocalStore {
+            override suspend fun putBatch(messages: List<PendingMessage>) { error("disk full") }
+        })
+        var queued: Boolean? = null
+        try {
+            vm.loadDmMessages("dm-1")
+            advanceUntilIdle()
+            vm.sendPhotos(listOf(PickedAttachmentFile("foto.jpg", "image/jpeg", byteArrayOf(1))), "", null) { queued = it }
+            advanceUntilIdle()
+            assertEquals(false, queued)
+            assertEquals(null, repository.lastAttachment)
+            assertTrue(vm.conversationState.value.pendingMessages.isEmpty())
+        } finally { vm.disconnectRealtime() }
+    }
+
     private fun createViewModel(
         repository: ChatTestRepository,
         personalMessagesSource: ChatTestPersonalMessagesSource =
@@ -450,6 +502,7 @@ private class ChatTestRepository(
     var lastSentTarget: ConversationTarget? = null
     var lastAttachmentTarget: ConversationTarget? = null
     var lastAttachment: PickedAttachmentFile? = null
+    var attachmentHandler: (suspend (ConversationTarget, PickedAttachmentFile, String, String?, String?) -> Message)? = null
 
     override suspend fun loadMessages(
         target: ConversationTarget,
@@ -485,6 +538,7 @@ private class ChatTestRepository(
     ): Message {
         lastAttachmentTarget = target
         lastAttachment = file
+        attachmentHandler?.let { return it(target, file, content, replyToId, clientMessageId) }
         return chatMessage(
             id = "attachment",
             dmId = (target as? ConversationTarget.DirectMessage)?.id,

@@ -16,6 +16,12 @@ internal actual suspend fun loadRemoteImage(url: String, maxEdge: Int): ImageBit
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
         val bytes = connection.getInputStream().use { it.readAttachmentBytes() }
+        decodePickedImage(bytes, maxEdge)
+    }.getOrNull()
+}
+
+internal actual suspend fun decodePickedImage(bytes: ByteArray, maxEdge: Int): ImageBitmap? = withContext(Dispatchers.IO) {
+    runCatching {
         ByteArrayInputStream(bytes).use { input ->
             ImageIO.createImageInputStream(input).use { stream ->
                 val reader = ImageIO.getImageReaders(stream).asSequence().firstOrNull() ?: return@withContext decodeSkiaPreview(bytes, maxEdge)
@@ -23,7 +29,7 @@ internal actual suspend fun loadRemoteImage(url: String, maxEdge: Int): ImageBit
                     reader.input = stream
                     val sample = ((maxOf(reader.getWidth(0), reader.getHeight(0)) + maxEdge - 1) / maxEdge).coerceAtLeast(1)
                     val parameters = reader.defaultReadParam.apply { setSourceSubsampling(sample, sample, 0, 0) }
-                    reader.read(0, parameters).toComposeImageBitmap()
+                    orientPickedImage(reader.read(0, parameters).toComposeImageBitmap(), bytes)
                 } finally { reader.dispose() }
             }
         }

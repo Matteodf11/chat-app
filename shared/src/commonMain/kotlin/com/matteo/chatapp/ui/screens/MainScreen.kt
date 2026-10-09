@@ -83,17 +83,37 @@ fun MainScreen(
     var imageToView by remember { mutableStateOf<com.matteo.chatapp.model.Message?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     var savingAttachment by remember { mutableStateOf(false) }
+    var mediaNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(imageToView?.id) { mediaNotice = null }
     val mediaScope = rememberCoroutineScope()
     val downloadMedia: (com.matteo.chatapp.model.Message) -> Unit = { message ->
         if (!savingAttachment) {
             savingAttachment = true
+            mediaNotice = null
             mediaScope.launch {
                 try {
                     val fresh = chatViewModel.refreshAttachment(message)
                     val url = fresh.attachmentUrl ?: error("Este archivo ya no está disponible")
-                    com.matteo.chatapp.platform.saveAttachment(url, fresh.attachmentName ?: "archivo")
+                    if (com.matteo.chatapp.platform.saveAttachment(url, fresh.attachmentName ?: "archivo")) mediaNotice = "Archivo guardado"
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Exception) { mediaError = e.message ?: "No se pudo guardar el archivo" }
+                finally { savingAttachment = false }
+            }
+        }
+    }
+    val shareMedia: (com.matteo.chatapp.model.Message) -> Unit = { message ->
+        if (!savingAttachment) {
+            savingAttachment = true
+            mediaNotice = null
+            mediaScope.launch {
+                try {
+                    val fresh = chatViewModel.refreshAttachment(message)
+                    val url = fresh.attachmentUrl ?: error("Esta imagen ya no está disponible")
+                    val result = com.matteo.chatapp.platform.shareImage(url, fresh.attachmentName ?: "imagen",
+                        fresh.attachmentContentType ?: "image/jpeg")
+                    if (result == com.matteo.chatapp.platform.ImageShareResult.COPIED) mediaNotice = "Imagen copiada. Puedes pegarla en otra aplicación."
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { mediaError = e.message ?: "No se pudo compartir la imagen" }
                 finally { savingAttachment = false }
             }
         }
@@ -263,6 +283,8 @@ fun MainScreen(
         canMessage = if (destinationKey.startsWith("dm:")) dms.find { it.id == destinationKey.removePrefix("dm:") }?.canMessage ?: true else true
     )
 
+    val latestActiveChatKey by rememberUpdatedState(activeChatKey)
+
     fun buildChatAreaActions(
         onTyping: (String) -> Unit,
         onSendText: (String, String?, () -> Unit) -> Unit,
@@ -283,6 +305,18 @@ fun MainScreen(
         onInputChange = { text ->
             updateDraft(text.take(4000))
             onTyping(text)
+        },
+        onSendPhotos = { files, comment, result ->
+            val draft = messageInput
+            val reply = replyingTo?.id
+            val chatKey = activeChatKey
+            chatViewModel.sendPhotos(files, comment, reply) { queued ->
+                if (queued && latestActiveChatKey == chatKey) {
+                    if (messageInput == draft) updateDraft("")
+                    if (replyingTo?.id == reply) replyingTo = null
+                }
+                result(queued)
+            }
         },
         onSendAttachment = { file, clearSelection ->
             val content = messageInput
@@ -972,8 +1006,9 @@ fun MainScreen(
             onOpenImage = { imageToView = it }, onDownload = downloadMedia)
     }
     imageToView?.let { image -> com.matteo.chatapp.ui.components.ImageViewerDialog(image,
-        refresh = chatViewModel::refreshAttachment, onDownload = downloadMedia, onDismiss = { imageToView = null }) }
-    mediaError?.let { error -> AlertDialog(onDismissRequest = { mediaError = null }, title = { Text("No se pudo guardar") },
+        refresh = chatViewModel::refreshAttachment, onDownload = downloadMedia, onShare = shareMedia,
+        onDismiss = { imageToView = null }, isWorking = savingAttachment, notice = mediaNotice) }
+    mediaError?.let { error -> AlertDialog(onDismissRequest = { mediaError = null }, title = { Text("No se pudo completar la acción") },
         text = { Text(error) }, confirmButton = { TextButton(onClick = { mediaError = null }) { Text("Aceptar") } }) }
 
 }

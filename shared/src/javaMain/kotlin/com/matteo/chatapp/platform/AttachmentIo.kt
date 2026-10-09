@@ -5,6 +5,8 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
@@ -36,3 +38,17 @@ internal suspend fun downloadAttachmentBytes(url: String): ByteArray {
 
 internal fun attachmentSaveName(name: String): String = name.substringAfterLast('/').substringAfterLast('\\')
     .replace(Regex("[\\p{Cntrl}<>:\"|?*]"), "_").trim(' ', '.').take(160).ifBlank { "archivo" }
+
+internal suspend fun prepareSharedImage(url: String, name: String, directory: File): File {
+    check(directory.isDirectory || directory.mkdirs()) { "No se pudo preparar la imagen" }
+    val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+    directory.listFiles()?.filter { it.isFile && it.name.startsWith("chimera-") && it.lastModified() < cutoff }
+        ?.forEach { it.delete() }
+    val bytes = downloadAttachmentBytes(url)
+    val file = File(directory, "chimera-${UUID.randomUUID()}-${attachmentSaveName(name)}")
+    try {
+        file.writeBytes(bytes)
+        currentCoroutineContext().ensureActive()
+        return file
+    } catch (e: Exception) { file.delete(); throw e }
+}

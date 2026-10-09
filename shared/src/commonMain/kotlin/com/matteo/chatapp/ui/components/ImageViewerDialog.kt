@@ -6,6 +6,12 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.ZoomIn
+import androidx.compose.material.icons.rounded.ZoomOut
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,7 +29,8 @@ import kotlinx.coroutines.CancellationException
 
 @Composable
 fun ImageViewerDialog(message: Message, refresh: suspend (Message) -> Message,
-    onDownload: (Message) -> Unit, onDismiss: () -> Unit) {
+    onDownload: (Message) -> Unit, onShare: (Message) -> Unit, onDismiss: () -> Unit,
+    isWorking: Boolean = false, notice: String? = null) {
     var bitmap by remember(message.id) { mutableStateOf<ImageBitmap?>(null) }
     var error by remember(message.id) { mutableStateOf<String?>(null) }
     var attempt by remember(message.id) { mutableStateOf(0) }
@@ -43,8 +50,8 @@ fun ImageViewerDialog(message: Message, refresh: suspend (Message) -> Message,
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(message.attachmentName ?: "Imagen", color = Color.White, maxLines = 1,
                     modifier = Modifier.weight(1f), overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                TextButton(onClick = { onDownload(message) }) { Text("Guardar") }
-                TextButton(onClick = onDismiss) { Text("Cerrar") }
+                if (isWorking) CircularProgressIndicator(Modifier.padding(12.dp).size(22.dp), strokeWidth = 2.dp)
+                IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Cerrar visor", tint = Color.White) }
             }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds(), contentAlignment = Alignment.Center) {
                 val density = androidx.compose.ui.platform.LocalDensity.current
@@ -64,11 +71,28 @@ fun ImageViewerDialog(message: Message, refresh: suspend (Message) -> Message,
                     TextButton(onClick = { attempt++ }) { Text("Reintentar") }
                 }
             }
-            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), horizontalArrangement = Arrangement.Center,
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically) {
-                TextButton(enabled = scale > 1f, onClick = { scale = (scale / 1.5f).coerceAtLeast(1f); offset = Offset.Zero }) { Text("−") }
+                IconButton(enabled = scale > 1f, onClick = { scale = (scale / 1.5f).coerceAtLeast(1f); offset = Offset.Zero }) {
+                    Icon(Icons.Rounded.ZoomOut, "Reducir imagen")
+                }
                 TextButton(onClick = { scale = 1f; offset = Offset.Zero }) { Text("${(scale * 100).toInt()} %") }
-                TextButton(enabled = scale < 5f, onClick = { scale = (scale * 1.5f).coerceAtMost(5f) }) { Text("+") }
+                IconButton(enabled = scale < 5f, onClick = { scale = (scale * 1.5f).coerceAtMost(5f) }) {
+                    Icon(Icons.Rounded.ZoomIn, "Ampliar imagen")
+                }
+            }
+            notice?.let { Text(it, color = Color.White, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(horizontal = 16.dp, vertical = 4.dp)) }
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+                OutlinedButton(enabled = !isWorking, onClick = { onDownload(message) }) {
+                    Icon(Icons.Rounded.Download, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp)); Text("Guardar")
+                }
+                OutlinedButton(enabled = !isWorking, onClick = { onShare(message) }) {
+                    Icon(Icons.Rounded.Share, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp)); Text(com.matteo.chatapp.platform.imageShareActionLabel())
+                }
             }
         }
     }

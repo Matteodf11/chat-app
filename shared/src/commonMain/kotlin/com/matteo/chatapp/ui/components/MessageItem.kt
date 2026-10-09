@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -114,7 +115,7 @@ fun MessageItem(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                if (!canModify) {
+                if (!canModify || message.attachmentContentType?.startsWith("image/") == true) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = message.createdAt?.substringAfter("T", "")?.take(5).orEmpty(),
@@ -152,7 +153,7 @@ fun MessageItem(
             if (message.edited && !canModify) {
                 Text(text = "Editado", color = Muted, fontSize = 10.sp)
             }
-            if (canModify && message.attachmentName != null) {
+            if (canModify && message.attachmentName != null && message.attachmentContentType?.startsWith("image/") != true) {
                 Text(sentMetadata, modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
                     color = Muted, fontSize = 11.sp)
             }
@@ -256,15 +257,10 @@ fun MessageItem(
 @Composable
 private fun AttachmentCard(message: Message, onOpenImage: (Message) -> Unit, onDownload: (Message) -> Unit) {
     if (message.attachmentContentType?.startsWith("image/") == true) {
-        Column(Modifier.widthIn(max = 360.dp).fillMaxWidth().background(SurfaceVariant, MaterialTheme.shapes.medium)) {
-            SharedMediaThumbnail(message.attachmentUrl, message.attachmentName,
-                Modifier.fillMaxWidth().height(220.dp).clickable(enabled = message.attachmentUrl != null) { onOpenImage(message) }, maxEdge = 1024)
-            Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(message.attachmentName ?: "Imagen", color = OnBackground, maxLines = 1,
-                    modifier = Modifier.weight(1f), overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                IconButton(onClick = { onDownload(message) }) { Icon(Icons.Rounded.Download, "Guardar imagen", tint = Primary) }
-            }
-        }
+        SharedMediaThumbnail(message.attachmentUrl, message.attachmentName,
+            Modifier.widthIn(max = 360.dp).clip(MaterialTheme.shapes.medium)
+                .clickable(enabled = message.attachmentUrl != null, onClickLabel = "Ver imagen") { onOpenImage(message) },
+            maxEdge = 1024, showFullImage = true)
         return
     }
     if (message.attachmentContentType?.startsWith("audio/") == true && message.attachmentUrl != null) {
