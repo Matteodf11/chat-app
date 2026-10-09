@@ -8,6 +8,7 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.put
+import io.ktor.client.request.setBody
 
 class FriendApi(private val client: HttpClient) {
 
@@ -53,9 +54,17 @@ class FriendApi(private val client: HttpClient) {
         }.body()
     }
 
-    suspend fun markDmRead(dmId: String, token: String) {
+    suspend fun updatePreferences(dmId: String, value: com.matteo.chatapp.model.DmPreferencesRequest, token: String): DmConversation =
+        client.put("$BASE_URL/api/friends/dm/$dmId/preferences") {
+            bearerAuth(token)
+            setBody(value)
+            headers.append("Content-Type", "application/json")
+        }.body()
+
+    suspend fun markDmRead(dmId: String, token: String, upToMessageId: String? = null) {
         client.put("$BASE_URL/api/friends/dm/$dmId/read") {
             bearerAuth(token)
+            upToMessageId?.let { url.parameters.append("upToMessageId", it) }
         }
     }
 }

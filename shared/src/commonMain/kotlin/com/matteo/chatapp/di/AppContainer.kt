@@ -64,7 +64,10 @@ class AppContainer(
         conversationEventsSource = WebSocketConversationEventsSource(newWebSocketClient()),
         profileEventsSource = WebSocketProfileEventsSource(newWebSocketClient()),
         personalMessagesSource = WebSocketPersonalMessagesSource(newWebSocketClient()),
-        inboxEventsSource = WebSocketDmInboxEventsSource(newWebSocketClient())
+        inboxEventsSource = WebSocketDmInboxEventsSource(newWebSocketClient()),
+        notifications = com.matteo.chatapp.platform.platformMessageNotificationSink(),
+        localStore = com.matteo.chatapp.repository.platformChatLocalStore(
+            com.matteo.chatapp.repository.SessionManager.getEmail().orEmpty())
     )
 
     fun createFriendViewModel() = FriendViewModel(

@@ -2,6 +2,7 @@ package com.matteo.chatapp.network
 
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpSend
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.plugin
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
@@ -17,6 +18,11 @@ val BASE_URL = "https://chat-backend-gnj6.onrender.com"
 
 fun createHttpClient(enableSessionRecovery: Boolean = true): HttpClient {
     val client = HttpClient {
+        install(HttpTimeout) {
+                requestTimeoutMillis = 60_000
+                connectTimeoutMillis = 15_000
+                socketTimeoutMillis = 60_000
+        }
         install(ContentNegotiation) {
             json(Json {
                 ignoreUnknownKeys = true

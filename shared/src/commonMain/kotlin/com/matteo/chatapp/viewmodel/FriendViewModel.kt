@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.matteo.chatapp.model.DmConversation
 import com.matteo.chatapp.model.FriendRequest
 import com.matteo.chatapp.model.ProfileEvent
+import com.matteo.chatapp.network.ApiException
 import com.matteo.chatapp.platform.PickedAvatarFile
 import com.matteo.chatapp.repository.AccessTokenProvider
 import com.matteo.chatapp.repository.AuthRepository
@@ -56,6 +57,7 @@ class FriendViewModel(
     }
 
     fun loadProfile() {
+        if (_uiState.value.savingProfile) return
         profileOperationJob?.cancel()
         profileOperationJob = viewModelScope.launch {
             try {
@@ -69,13 +71,16 @@ class FriendViewModel(
         }
     }
 
-    fun saveProfile(username: String, status: String, avatarFile: PickedAvatarFile?, bannerFile: PickedAvatarFile?, onComplete: () -> Unit = {}) {
+    fun saveProfile(username: String, status: String, bio: String, avatarFile: PickedAvatarFile?, bannerFile: PickedAvatarFile?, onComplete: () -> Unit = {}) {
+        if (_uiState.value.savingProfile) return
+        _uiState.update { it.copy(savingProfile = true, error = null) }
         profileOperationJob?.cancel()
         profileOperationJob = viewModelScope.launch {
             try {
                 val updated = profileRepository.saveProfile(
                     username = username,
                     status = status,
+                    bio = bio,
                     avatarFile = avatarFile,
                     bannerFile = bannerFile
                 )
@@ -88,6 +93,8 @@ class FriendViewModel(
                 _uiState.update {
                     it.copy(error = e.message?.takeIf(String::isNotBlank) ?: "No se pudo guardar el perfil")
                 }
+            } finally {
+                _uiState.update { it.copy(savingProfile = false) }
             }
         }
     }
@@ -224,13 +231,17 @@ class FriendViewModel(
                 }
                 return@launch
             }
+            _uiState.update { it.copy(isSearchingUser = true, searchResult = null, error = null) }
             try {
                 val result = profileRepository.findUser(cleanUsername)
                 _uiState.update { it.copy(searchResult = result, error = null) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(searchResult = null, error = "Usuario no encontrado") }
+                _uiState.update { it.copy(searchResult = null, error =
+                    if (e is ApiException) e.message else "No se pudo buscar el usuario. Comprueba tu conexión.") }
+            } finally {
+                _uiState.update { it.copy(isSearchingUser = false) }
             }
         }
     }
@@ -325,7 +336,6 @@ class FriendViewModel(
                 _uiState.update {
                     it.copy(selectedDm = dm, dms = it.dms.upsertDm(dm), error = null)
                 }
-                markDmRead(dm.id)
                 openDmJob = null
                 onOpened(dm)
             } catch (e: CancellationException) {
@@ -342,9 +352,6 @@ class FriendViewModel(
         val readDm = dm.copy(hasUnread = false)
         _uiState.update {
             it.copy(selectedDm = readDm, dms = it.dms.upsertDm(readDm))
-        }
-        viewModelScope.launch {
-            markDmRead(dm.id)
         }
     }
 
@@ -379,15 +386,20 @@ class FriendViewModel(
     }
 
     fun changePassword(currentPassword: String, newPassword: String, onComplete: () -> Unit) {
+        if (_uiState.value.changingPassword) return
+        _uiState.update { it.copy(changingPassword = true, passwordError = null) }
         viewModelScope.launch {
             try {
                 authRepository.changePassword(currentPassword, newPassword)
-                _uiState.update { it.copy(error = null) }
                 onComplete()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "No se pudo cambiar la contrasena") }
+                val message = if (e is ApiException) e.message else
+                    "No se pudo conectar con el servidor. Inténtalo de nuevo."
+                _uiState.update { it.copy(passwordError = message) }
+            } finally {
+                _uiState.update { it.copy(changingPassword = false) }
             }
         }
     }

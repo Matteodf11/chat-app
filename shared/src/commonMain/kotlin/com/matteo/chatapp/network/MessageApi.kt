@@ -20,25 +20,32 @@ import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 
 class MessageApi(private val client: HttpClient) {
+    suspend fun sharedItems(dmId: String, kind: String, before: String?, token: String): com.matteo.chatapp.model.SharedItemsPage =
+        client.get("$BASE_URL/api/messages/dm/$dmId/shared") {
+            bearerAuth(token)
+            parameter("kind", kind)
+            before?.let { parameter("before", it) }
+        }.bodyOrApiError()
 
     suspend fun getChannelMessages(channelId: String, token: String, before: String? = null): MessagePage {
         return client.get("$BASE_URL/api/messages/channel/$channelId") {
             bearerAuth(token)
             parameter("limit", 50)
             before?.let { parameter("before", it) }
-        }.body()
+        }.bodyOrApiError()
     }
 
-    suspend fun sendMessage(channelId: String, content: String, replyToId: String?, token: String): Message {
+    suspend fun sendMessage(channelId: String, content: String, replyToId: String?, token: String, clientMessageId: String? = null): Message {
         return client.post("$BASE_URL/api/messages/channel/$channelId") {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(buildMap {
                 put("content", content)
                 put("channelId", channelId)
+                clientMessageId?.let { put("clientMessageId", it) }
                 replyToId?.let { put("replyToId", it) }
             })
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun getDmMessages(dmId: String, token: String, before: String? = null): MessagePage {
@@ -46,7 +53,7 @@ class MessageApi(private val client: HttpClient) {
             bearerAuth(token)
             parameter("limit", 50)
             before?.let { parameter("before", it) }
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun searchChannelMessages(
@@ -72,19 +79,20 @@ class MessageApi(private val client: HttpClient) {
     suspend fun getMessageContext(messageId: String, token: String): MessagePage {
         return client.get("$BASE_URL/api/messages/context/$messageId") {
             bearerAuth(token)
-        }.body()
+        }.bodyOrApiError()
     }
 
-    suspend fun sendDmMessage(dmId: String, content: String, replyToId: String?, token: String): Message {
+    suspend fun sendDmMessage(dmId: String, content: String, replyToId: String?, token: String, clientMessageId: String? = null): Message {
         return client.post("$BASE_URL/api/messages/dm/$dmId") {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(buildMap {
                 put("content", content)
                 put("dmId", dmId)
+                clientMessageId?.let { put("clientMessageId", it) }
                 replyToId?.let { put("replyToId", it) }
             })
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun sendChannelAttachment(
@@ -92,16 +100,18 @@ class MessageApi(private val client: HttpClient) {
         file: PickedAttachmentFile,
         content: String,
         replyToId: String?,
-        token: String
-    ): Message = sendAttachment("channel", channelId, file, content, replyToId, token)
+        token: String,
+        clientMessageId: String? = null
+    ): Message = sendAttachment("channel", channelId, file, content, replyToId, token, clientMessageId)
 
     suspend fun sendDmAttachment(
         dmId: String,
         file: PickedAttachmentFile,
         content: String,
         replyToId: String?,
-        token: String
-    ): Message = sendAttachment("dm", dmId, file, content, replyToId, token)
+        token: String,
+        clientMessageId: String? = null
+    ): Message = sendAttachment("dm", dmId, file, content, replyToId, token, clientMessageId)
 
     private suspend fun sendAttachment(
         destination: String,
@@ -109,19 +119,21 @@ class MessageApi(private val client: HttpClient) {
         file: PickedAttachmentFile,
         content: String,
         replyToId: String?,
-        token: String
+        token: String,
+        clientMessageId: String?
     ): Message {
         return client.post("$BASE_URL/api/messages/$destination/$destinationId/attachment") {
             bearerAuth(token)
             setBody(MultiPartFormDataContent(formData {
                 append("content", content)
+                clientMessageId?.let { append("clientMessageId", it) }
                 replyToId?.let { append("replyToId", it) }
                 append("file", file.bytes, Headers.build {
                     append(HttpHeaders.ContentType, file.contentType)
                     append(HttpHeaders.ContentDisposition, "filename=\"${file.fileName.replace("\"", "")}\"")
                 })
             }))
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun editMessage(messageId: String, content: String, token: String): Message {
@@ -129,13 +141,13 @@ class MessageApi(private val client: HttpClient) {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(mapOf("content" to content))
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun deleteMessage(messageId: String, token: String) {
         client.delete("$BASE_URL/api/messages/$messageId") {
             bearerAuth(token)
-        }
+        }.requireApiSuccess()
     }
 
     private suspend fun searchMessages(
@@ -156,6 +168,6 @@ class MessageApi(private val client: HttpClient) {
             if (to.isNotBlank()) parameter("to", to.trim())
             if (attachmentsOnly) parameter("attachmentsOnly", true)
             parameter("limit", 50)
-        }.body()
+        }.bodyOrApiError()
     }
 }

@@ -10,10 +10,18 @@ import com.matteo.chatapp.ui.theme.ThemeAccent
 import com.matteo.chatapp.ui.theme.ThemeMode
 import com.matteo.chatapp.di.AppContainer
 import com.matteo.chatapp.network.SessionRefresher
+import com.matteo.chatapp.network.isSessionRejected
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,31 +40,46 @@ fun App() {
         var sessionKey by remember { mutableStateOf(0) }
         var isLoggedIn by remember { mutableStateOf(SessionManager.isLoggedIn()) }
         var isCheckingSession by remember { mutableStateOf(SessionManager.hasRememberedSession()) }
+        var sessionRestoreError by remember { mutableStateOf(false) }
+        var sessionRestoreAttempt by remember { mutableStateOf(0) }
         val scope = rememberCoroutineScope()
 
-        LaunchedEffect(Unit) {
+        LaunchedEffect(sessionRestoreAttempt) {
+            sessionRestoreError = false
             val refreshToken = SessionManager.getRefreshToken()
             if (SessionManager.hasRememberedSession() && refreshToken != null) {
+                isCheckingSession = true
                 try {
                     SessionRefresher.refreshSession()
                     isLoggedIn = true
-                } catch (_: Exception) {
-                    SessionManager.clearSession()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (isSessionRejected(e)) SessionManager.clearSession()
+                    else sessionRestoreError = true
                 }
             }
             isCheckingSession = false
         }
 
         LaunchedEffect(isLoggedIn) {
+            var nextRefreshDelay = 10 * 60 * 1000L
             while (isLoggedIn) {
-                delay(10 * 60 * 1000L)
+                delay(nextRefreshDelay)
                 val refreshToken = SessionManager.getRefreshToken() ?: break
                 try {
                     SessionRefresher.refreshSession()
-                } catch (_: Exception) {
-                    SessionManager.clearSession()
-                    isLoggedIn = false
-                    sessionKey++
+                    nextRefreshDelay = 10 * 60 * 1000L
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (isSessionRejected(e)) {
+                        SessionManager.clearSession()
+                        isLoggedIn = false
+                        sessionKey++
+                    } else {
+                        nextRefreshDelay = 30_000
+                    }
                 }
             }
         }
@@ -65,7 +88,18 @@ fun App() {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
+        } else if (sessionRestoreError) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("No hemos podido conectar. Tu sesión sigue guardada.")
+                    Button(onClick = { isCheckingSession = true; sessionRestoreAttempt++ }) {
+                        Text("Reintentar")
+                    }
+                }
+            }
         } else if (isLoggedIn) {
+            com.matteo.chatapp.platform.PrepareMessageNotifications()
             key(sessionKey) {
                 MainScreen(
                     createServerViewModel = appContainer::createServerViewModel,

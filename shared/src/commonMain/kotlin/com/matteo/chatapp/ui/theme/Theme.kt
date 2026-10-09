@@ -46,41 +46,42 @@ data class AppPalette(
     val error: Color
 )
 
+// Neutral surfaces let each user-selected accent define the visual identity.
 private val DarkBase = AppPalette(
-    background = Color(0xFF121316),
-    navigation = Color(0xFF0C0D0F),
-    surface = Color(0xFF181A1F),
-    surfaceVariant = Color(0xFF24272E),
-    surfaceElevated = Color(0xFF2D3139),
+    background = Color(0xFF111111),
+    navigation = Color(0xFF0A0A0A),
+    surface = Color(0xFF191919),
+    surfaceVariant = Color(0xFF252525),
+    surfaceElevated = Color(0xFF303030),
     primary = ThemeAccent.CORAL.color,
     primaryHover = Color(0xFFF07D60),
     primarySoft = ThemeAccent.CORAL.darkSoft,
     accent = Color(0xFF53C7A5),
     warning = Color(0xFFF0B45B),
     onPrimary = Color.White,
-    onBackground = Color(0xFFF5F3EF),
-    onSurface = Color(0xFFB9BCC3),
-    muted = Color(0xFF7E838D),
-    outline = Color(0xFF30343C),
+    onBackground = Color(0xFFF4F4F4),
+    onSurface = Color(0xFFCCCCCC),
+    muted = Color(0xFF999999),
+    outline = Color(0xFF303030),
     error = Color(0xFFFF747A)
 )
 
 private val LightBase = AppPalette(
-    background = Color(0xFFF4F5F7),
-    navigation = Color(0xFFE8EAEE),
+    background = Color(0xFFFAFAFA),
+    navigation = Color(0xFFEBEBEB),
     surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFE9EBEF),
-    surfaceElevated = Color(0xFFDDE0E5),
+    surfaceVariant = Color(0xFFF0F0F0),
+    surfaceElevated = Color(0xFFE3E3E3),
     primary = ThemeAccent.CORAL.color,
     primaryHover = Color(0xFFC95D44),
     primarySoft = ThemeAccent.CORAL.lightSoft,
     accent = Color(0xFF168666),
     warning = Color(0xFFB77516),
     onPrimary = Color.White,
-    onBackground = Color(0xFF1A1B1F),
-    onSurface = Color(0xFF51565F),
-    muted = Color(0xFF7A808A),
-    outline = Color(0xFFD5D8DE),
+    onBackground = Color(0xFF1B1B1B),
+    onSurface = Color(0xFF515151),
+    muted = Color(0xFF686868),
+    outline = Color(0xFFD8D8D8),
     error = Color(0xFFC93E49)
 )
 
@@ -111,11 +112,11 @@ private val AppTypography = Typography(
 )
 
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(6.dp),
-    medium = RoundedCornerShape(8.dp),
-    large = RoundedCornerShape(10.dp),
-    extraLarge = RoundedCornerShape(12.dp)
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(24.dp)
 )
 
 @Composable

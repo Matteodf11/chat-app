@@ -22,8 +22,21 @@ data class DmConversation(
     val otherAvatar: String? = null,
     val otherIsOnline: Boolean = false,
     val hasUnread: Boolean = false,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val unreadCount: Int = 0,
+    val lastMessagePreview: String? = null,
+    val lastMessageAt: String? = null,
+    val lastActivityAt: String? = null,
+    val pinned: Boolean = false,
+    val muted: Boolean = false,
+    val archived: Boolean = false
 )
+
+@Serializable
+data class DmPreferencesRequest(val pinned: Boolean? = null, val muted: Boolean? = null, val archived: Boolean? = null)
+
+@Serializable
+data class DmReadEvent(val type: String = "dm_read", val dmId: String, val readerId: String, val readAt: String)
 
 @Serializable
 data class FriendshipEvent(

@@ -62,6 +62,8 @@ object SessionManager {
     fun isRemembered(): Boolean = remembered
 
     fun clearSession() {
+        com.matteo.chatapp.platform.NotificationNavigation.clear()
+        com.matteo.chatapp.platform.clearMessageNotifications()
         token = null
         refreshToken = null
         username = null

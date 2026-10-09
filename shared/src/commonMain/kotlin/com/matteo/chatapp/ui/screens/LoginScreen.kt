@@ -1,6 +1,9 @@
 package com.matteo.chatapp.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,12 +85,13 @@ fun LoginScreen(
     var username by remember { mutableStateOf("") }
     var isRegisterMode by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(true) }
+    var confirmPassword by remember { mutableStateOf("") }
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     val submitAuth = {
         if (state !is AuthState.Loading) {
-            if (isRegisterMode) viewModel.register(username, email, password)
-            else viewModel.login(email, password, rememberMe)
+            if (isRegisterMode && password == confirmPassword) viewModel.register(username, email, password)
+            else if (!isRegisterMode) viewModel.login(email, password, rememberMe)
         }
     }
 
@@ -99,11 +103,11 @@ fun LoginScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(Background).windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
+        modifier = Modifier.fillMaxSize().background(Background).windowInsetsPadding(WindowInsets.safeDrawing).imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.widthIn(min = 340.dp, max = 400.dp),
+            modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
@@ -149,6 +153,14 @@ fun LoginScreen(
                     isPassword = true,
                     onSubmit = submitAuth
                 )
+                if (isRegisterMode) {
+                    Text("Contraseña de 10 a 72 caracteres", color = Muted, fontSize = 12.sp)
+                    AuthField(value = confirmPassword, onValueChange = { confirmPassword = it },
+                        label = "Repite la contraseña", keyboardType = KeyboardType.Password, isPassword = true, onSubmit = submitAuth)
+                    if (confirmPassword.isNotEmpty() && password != confirmPassword) {
+                        Text("Las contraseñas no coinciden", color = Error, fontSize = 12.sp)
+                    }
+                }
 
                 if (!isRegisterMode) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -170,7 +182,8 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Primary),
-                    enabled = state !is AuthState.Loading
+                    enabled = state !is AuthState.Loading && email.isNotBlank() && password.isNotBlank() &&
+                        (!isRegisterMode || (password == confirmPassword && username.isNotBlank()))
                 ) {
                     if (state is AuthState.Loading) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OnPrimary, strokeWidth = 2.dp)
@@ -182,6 +195,7 @@ fun LoginScreen(
 
             Spacer(Modifier.height(8.dp))
             TextButton(
+                enabled = state !is AuthState.Loading,
                 onClick = {
                     isRegisterMode = !isRegisterMode
                     viewModel.resetState()
@@ -204,6 +218,7 @@ private fun AuthField(
     onSubmit: (() -> Unit)? = null
 ) {
     val focusManager = LocalFocusManager.current
+    var passwordVisible by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -218,7 +233,10 @@ private fun AuthField(
             },
         shape = RoundedCornerShape(8.dp),
         singleLine = true,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+        trailingIcon = if (isPassword) { { TextButton(onClick = { passwordVisible = !passwordVisible }) {
+            Text(if (passwordVisible) "Ocultar" else "Mostrar", fontSize = 11.sp)
+        } } } else null,
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
             imeAction = if (onSubmit != null) ImeAction.Done else ImeAction.Next

@@ -3,6 +3,7 @@ package com.matteo.chatapp.network
 import com.matteo.chatapp.repository.SessionManager
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CancellationException
 
 object SessionRefresher {
     private val refreshMutex = Mutex()
@@ -15,7 +16,13 @@ object SessionRefresher {
     suspend fun recoverAfterRejectedToken(failedToken: String?): String? = refreshMutex.withLock {
         val currentToken = SessionManager.getToken()
         if (currentToken != null && currentToken != failedToken) return@withLock currentToken
-        runCatching { refreshLocked() }.getOrNull()
+        try {
+            refreshLocked()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private suspend fun refreshLocked(): String {

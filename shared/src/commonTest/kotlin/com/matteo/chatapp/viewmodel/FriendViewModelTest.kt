@@ -6,6 +6,8 @@ import com.matteo.chatapp.model.FriendshipEvent
 import com.matteo.chatapp.model.PresenceEvent
 import com.matteo.chatapp.model.ProfileEvent
 import com.matteo.chatapp.model.UserProfile
+import com.matteo.chatapp.network.ApiException
+import kotlinx.coroutines.CompletableDeferred
 import com.matteo.chatapp.platform.PickedAvatarFile
 import com.matteo.chatapp.repository.AccessTokenProvider
 import com.matteo.chatapp.repository.AuthRepository
@@ -34,6 +36,50 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class FriendViewModelTest {
     @Test
+    fun passwordChangeShowsServerErrorAndAllowsRetryWithoutDuplicateRequests() = runViewModelTest {
+        val response = CompletableDeferred<Unit>()
+        var calls = 0
+        val repository = NoOpAuthRepository {
+            calls++
+            response.await()
+        }
+        val viewModel = createViewModel(FakeFriendRepository(), FakeProfileRepository(profile("me", "Matteo")), authRepository = repository)
+        var completed = false
+        try {
+            advanceUntilIdle()
+            viewModel.changePassword("old-password", "new-password") { completed = true }
+            viewModel.changePassword("old-password", "new-password") { completed = true }
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.changingPassword)
+            assertEquals(1, calls)
+            response.completeExceptionally(ApiException("La contraseña actual no es correcta", 400))
+            advanceUntilIdle()
+            assertFalse(completed)
+            assertFalse(viewModel.uiState.value.changingPassword)
+            assertEquals("La contraseña actual no es correcta", viewModel.uiState.value.passwordError)
+        } finally {
+            viewModel.disconnectRealtime()
+        }
+    }
+
+    @Test
+    fun passwordChangeOnlyCompletesAfterRepositorySuccess() = runViewModelTest {
+        val viewModel = createViewModel(FakeFriendRepository(), FakeProfileRepository(profile("me", "Matteo")))
+        var completed = false
+        try {
+            advanceUntilIdle()
+            viewModel.changePassword("old-password", "new-password") { completed = true }
+            assertFalse(completed)
+            advanceUntilIdle()
+            assertTrue(completed)
+            assertFalse(viewModel.uiState.value.changingPassword)
+            assertEquals(null, viewModel.uiState.value.passwordError)
+        } finally {
+            viewModel.disconnectRealtime()
+        }
+    }
+
+    @Test
     fun initializationLoadsProfileAndFriendSnapshot() = runViewModelTest {
         val profile = profile(id = "me", username = "Matteo")
         val friend = friendship(id = "friendship-1", friendId = "friend-1")
@@ -61,7 +107,7 @@ class FriendViewModelTest {
     }
 
     @Test
-    fun openingDmMarksItReadAndPresenceEventUpdatesIt() = runViewModelTest {
+    fun openingDmWaitsForVisibleMessagesToMarkReadAndPresenceEventUpdatesIt() = runViewModelTest {
         val openedDm = dm(
             id = "dm-2",
             otherUserId = "friend-2",
@@ -80,7 +126,7 @@ class FriendViewModelTest {
             viewModel.openDm("friend-2")
             advanceUntilIdle()
 
-            assertEquals(listOf("dm-2"), friendRepository.markedAsRead)
+            assertTrue(friendRepository.markedAsRead.isEmpty())
             assertFalse(assertNotNull(viewModel.uiState.value.selectedDm).hasUnread)
 
             presenceSource.emit(
@@ -101,11 +147,12 @@ class FriendViewModelTest {
     private fun createViewModel(
         friendRepository: FakeFriendRepository,
         profileRepository: FakeProfileRepository,
-        presenceEventsSource: FakePresenceEventsSource = FakePresenceEventsSource()
+        presenceEventsSource: FakePresenceEventsSource = FakePresenceEventsSource(),
+        authRepository: AuthRepository = NoOpAuthRepository()
     ) = FriendViewModel(
         friendRepository = friendRepository,
         profileRepository = profileRepository,
-        authRepository = NoOpAuthRepository(),
+        authRepository = authRepository,
         accessTokenProvider = EmptyAccessTokenProvider,
         friendshipEventsSource = FakeFriendshipEventsSource(),
         presenceEventsSource = presenceEventsSource,
@@ -163,9 +210,10 @@ private class FakeProfileRepository(
     override suspend fun saveProfile(
         username: String,
         status: String,
+        bio: String,
         avatarFile: PickedAvatarFile?,
         bannerFile: PickedAvatarFile?
-    ): UserProfile = ownProfile.copy(username = username, status = status)
+    ): UserProfile = ownProfile.copy(username = username, status = status, bio = bio)
 
     override suspend fun findUser(username: String): UserProfile =
         ownProfile.copy(username = username)
@@ -207,14 +255,14 @@ private class FakeProfileEventsSource : ProfileEventsSource {
     override fun disconnect() = Unit
 }
 
-private class NoOpAuthRepository : AuthRepository {
+private class NoOpAuthRepository(private val onChangePassword: suspend () -> Unit = {}) : AuthRepository {
     override suspend fun login(email: String, password: String, rememberMe: Boolean) = Unit
 
     override suspend fun register(username: String, email: String, password: String) = Unit
 
     override suspend fun logout(refreshToken: String) = Unit
 
-    override suspend fun changePassword(currentPassword: String, newPassword: String) = Unit
+    override suspend fun changePassword(currentPassword: String, newPassword: String) = onChangePassword()
 }
 
 private fun profile(id: String, username: String) = UserProfile(

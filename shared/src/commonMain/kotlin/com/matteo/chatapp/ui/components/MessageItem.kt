@@ -23,6 +23,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.matteo.chatapp.model.Message
@@ -51,6 +54,11 @@ fun MessageItem(
     var showEditDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var editedContent by remember(message.id, message.content) { mutableStateOf(message.content) }
+    val sentMetadata = listOfNotNull(
+        "Editado".takeIf { message.edited },
+        message.createdAt?.substringAfter("T", "")?.take(5)?.takeIf { it.isNotBlank() },
+        if (message.readAt != null) "Leído" else "Enviado"
+    ).joinToString(" · ")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -103,17 +111,26 @@ fun MessageItem(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = message.createdAt?.substringAfter("T", "")?.take(5).orEmpty(),
-                    color = Muted,
-                    fontSize = 11.sp
-                )
+                if (!canModify) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = message.createdAt?.substringAfter("T", "")?.take(5).orEmpty(),
+                        color = Muted,
+                        fontSize = 11.sp
+                    )
+                }
             }
             if (message.content.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = message.content,
+                    text = buildAnnotatedString {
+                        append(message.content)
+                        if (canModify && message.attachmentName == null) {
+                            withStyle(SpanStyle(color = Muted, fontSize = 11.sp)) {
+                                append("   $sentMetadata")
+                            }
+                        }
+                    },
                     color = OnSurface,
                     fontSize = 14.sp,
                     lineHeight = 20.sp
@@ -123,8 +140,12 @@ fun MessageItem(
                 Spacer(Modifier.height(7.dp))
                 AttachmentCard(message)
             }
-            if (message.edited) {
+            if (message.edited && !canModify) {
                 Text(text = "Editado", color = Muted, fontSize = 10.sp)
+            }
+            if (canModify && message.attachmentName != null) {
+                Text(sentMetadata, modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
+                    color = Muted, fontSize = 11.sp)
             }
             Box {
                 DropdownMenu(

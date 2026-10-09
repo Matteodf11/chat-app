@@ -29,6 +29,8 @@ kotlin {
     }
     
     sourceSets {
+        androidMain { kotlin.srcDir("src/javaMain/kotlin") }
+        jvmMain { kotlin.srcDir("src/javaMain/kotlin") }
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.activity.compose)
@@ -37,6 +39,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
+            implementation(compose.animation)
             implementation(libs.compose.material3)
             implementation(compose.materialIconsExtended)
             implementation(libs.compose.ui)

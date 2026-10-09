@@ -15,9 +15,25 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 
 class WebSocketClient(private val client: HttpClient) {
+    private val _readEvents = MutableSharedFlow<com.matteo.chatapp.model.DmReadEvent>()
+    val readEvents = _readEvents as SharedFlow<com.matteo.chatapp.model.DmReadEvent>
+    private val _dmSettings = MutableSharedFlow<com.matteo.chatapp.model.DmConversation>()
+    val dmSettings = _dmSettings as SharedFlow<com.matteo.chatapp.model.DmConversation>
+    private fun isReadEvent(body: String) = decoder.parseToJsonElement(body).let {
+        (it as? kotlinx.serialization.json.JsonObject)?.get("type")?.toString() == "\"dm_read\""
+    }
+    private val _connected = MutableStateFlow(false)
+    val connected = _connected.asStateFlow()
+    private val decoder = Json { ignoreUnknownKeys = true }
     private val closeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _incomingMessages = MutableSharedFlow<Message>()
@@ -62,39 +78,44 @@ class WebSocketClient(private val client: HttpClient) {
     }
 
     suspend fun connectPersonalMessages(token: String) {
-        connectEvents(token, "personal-messages", "/user/queue/messages") { body ->
-            _personalMessages.emit(Json.decodeFromString<Message>(body))
+        connectEvents(token, "personal-messages", listOf("/user/queue/messages", "/user/queue/read-receipts", "/user/queue/dm-settings")) { subscription, body ->
+            when (subscription) {
+                "personal-messages-1" -> _readEvents.emit(decoder.decodeFromString(body))
+                "personal-messages-2" -> _dmSettings.emit(decoder.decodeFromString(body))
+                else -> _personalMessages.emit(decoder.decodeFromString<Message>(body))
+            }
         }
     }
 
     suspend fun connectDmInbox(token: String, dmIds: List<String>) {
         if (dmIds.isEmpty()) return
         connectEvents(token, "dm-inbox", dmIds.distinct().map { "/topic/dm.$it" }) { _, body ->
-            _personalMessages.emit(Json.decodeFromString<Message>(body))
+            if (isReadEvent(body)) _readEvents.emit(decoder.decodeFromString(body))
+            else _personalMessages.emit(decoder.decodeFromString<Message>(body))
         }
     }
 
     suspend fun connectFriendEvents(token: String, userId: String? = null) {
         connectEvents(token, "friends", listOfNotNull("/user/queue/friends", userId?.let { "/topic/friends.$it" })) { _, body ->
-            _friendshipEvents.emit(Json.decodeFromString<FriendshipEvent>(body))
+            _friendshipEvents.emit(decoder.decodeFromString<FriendshipEvent>(body))
         }
     }
 
     suspend fun connectPresenceEvents(token: String) {
         connectEvents(token, "presence", "/topic/presence") { body ->
-            _presenceEvents.emit(Json.decodeFromString<PresenceEvent>(body))
+            _presenceEvents.emit(decoder.decodeFromString<PresenceEvent>(body))
         }
     }
 
     suspend fun connectProfileEvents(token: String) {
         connectEvents(token, "profile", "/topic/profile") { body ->
-            _profileEvents.emit(Json.decodeFromString<ProfileEvent>(body))
+            _profileEvents.emit(decoder.decodeFromString<ProfileEvent>(body))
         }
     }
 
     suspend fun connectServerEvents(token: String) {
         connectEvents(token, "server-events", "/user/queue/server-events") { body ->
-            _serverEvents.emit(Json.decodeFromString<ServerEvent>(body))
+            _serverEvents.emit(decoder.decodeFromString<ServerEvent>(body))
         }
     }
 
@@ -110,9 +131,10 @@ class WebSocketClient(private val client: HttpClient) {
             destinations = listOf(messageDestination, typingDestination)
         ) { subscription, body ->
             if (subscription == "$subscriptionId-0") {
-                _incomingMessages.emit(Json.decodeFromString<Message>(body))
+                if (isReadEvent(body)) _readEvents.emit(decoder.decodeFromString(body))
+                else _incomingMessages.emit(decoder.decodeFromString<Message>(body))
             } else {
-                _typingEvents.emit(Json.decodeFromString<TypingEvent>(body))
+                _typingEvents.emit(decoder.decodeFromString<TypingEvent>(body))
             }
         }
     }
@@ -141,29 +163,50 @@ class WebSocketClient(private val client: HttpClient) {
         ) {
             session = this
             connectStomp(token)
+            val heartbeat = launch {
+                while (isActive) {
+                    delay(10000)
+                    send(Frame.Text("\n"))
+                }
+            }
             var subscribed = false
-            for (frame in incoming) {
-                if (frame is Frame.Text) {
-                    val text = frame.readText().trimStart('\n', '\r')
-                    if (text.startsWith("ERROR")) {
-                        throw IllegalStateException(extractStompBody(text).ifBlank { "STOMP subscription rejected" })
-                    }
-                    try {
-                        if (!subscribed && text.startsWith("CONNECTED")) {
-                            destinations.forEachIndexed { index, destination ->
-                                subscribeToDestination("$subscriptionId-$index", destination)
-                            }
-                            subscribed = true
-                            continue
+            var receiveTimeout = 15000L
+            try {
+                while (true) {
+                    val frame = if (receiveTimeout > 0) withTimeout(receiveTimeout) { incoming.receive() } else incoming.receive()
+                    if (frame is Frame.Text) {
+                        val text = frame.readText().trimStart('\n', '\r')
+                        if (text.startsWith("ERROR")) {
+                            throw IllegalStateException(extractStompBody(text).ifBlank { "STOMP subscription rejected" })
                         }
-                        if (!subscribed || !text.startsWith("MESSAGE")) continue
+                        try {
+                            if (!subscribed && text.startsWith("CONNECTED")) {
+                                val serverHeartbeat = extractStompHeader(text, "heart-beat").substringBefore(',').toLongOrNull() ?: 0
+                                receiveTimeout = if (serverHeartbeat > 0) maxOf(10000L, serverHeartbeat) * 3 + 5000 else 0
+                                destinations.forEachIndexed { index, destination ->
+                                    subscribeToDestination("$subscriptionId-$index", destination)
+                                }
+                                subscribed = true
+                                _connected.value = true
+                                continue
+                            }
+                            if (!subscribed || !text.startsWith("MESSAGE")) continue
 
-                        val subscription = extractStompHeader(text, "subscription")
-                        val body = extractStompBody(text)
-                        if (body.isNotBlank()) onBody(subscription, body)
-                    } catch (e: Exception) {
-                        // ignorar frames no parseables
+                            val subscription = extractStompHeader(text, "subscription")
+                            val body = extractStompBody(text)
+                            if (body.isNotBlank()) onBody(subscription, body)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            // ignorar frames no parseables
+                        }
                     }
+                }
+            } finally {
+                heartbeat.cancel()
+                if (session === this) {
+                    session = null
+                    _connected.value = false
                 }
             }
         }
@@ -243,6 +286,7 @@ class WebSocketClient(private val client: HttpClient) {
     }
 
     fun disconnect() {
+        _connected.value = false
         val currentSession = session
         session = null
         if (currentSession != null) {

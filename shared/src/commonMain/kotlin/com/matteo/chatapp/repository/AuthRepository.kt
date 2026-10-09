@@ -36,7 +36,7 @@ class NetworkAuthRepository(
             refreshToken = response.refreshToken,
             username = response.username,
             email = response.email,
-            remember = false
+            remember = true
         )
     }
 

@@ -20,7 +20,9 @@ data class Message(
     val attachmentContentType: String? = null,
     val attachmentSize: Long? = null,
     val attachmentUrl: String? = null,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val clientMessageId: String? = null,
+    val readAt: String? = null
 )
 
 @Serializable
@@ -28,6 +30,9 @@ data class MessagePage(
     val messages: List<Message>,
     val hasMore: Boolean
 )
+
+@Serializable
+data class SharedItemsPage(val messages: List<Message>, val hasMore: Boolean, val nextBefore: String? = null)
 
 @Serializable
 data class TypingEvent(

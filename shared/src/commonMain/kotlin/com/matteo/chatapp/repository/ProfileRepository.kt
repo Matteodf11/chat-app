@@ -11,6 +11,7 @@ interface ProfileRepository {
     suspend fun saveProfile(
         username: String,
         status: String,
+        bio: String,
         avatarFile: PickedAvatarFile?,
         bannerFile: PickedAvatarFile?
     ): UserProfile
@@ -37,6 +38,7 @@ class NetworkProfileRepository(
     override suspend fun saveProfile(
         username: String,
         status: String,
+        bio: String,
         avatarFile: PickedAvatarFile?,
         bannerFile: PickedAvatarFile?
     ): UserProfile {
@@ -47,7 +49,8 @@ class NetworkProfileRepository(
                 avatarUrl = null,
                 profileBannerUrl = null,
                 status = status.trim().takeIf(String::isNotBlank),
-                profileColor = null
+                profileColor = null,
+                bio = bio.trim()
             ),
             token
         )

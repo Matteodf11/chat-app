@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,6 +70,8 @@ fun MainScreen(
     val selectedChannel = serverState.selectedChannel
     val conversationState by chatViewModel.conversationState.collectAsStateWithLifecycle()
     val searchState by chatViewModel.searchState.collectAsStateWithLifecycle()
+    val sharedItems by chatViewModel.sharedItems.collectAsStateWithLifecycle()
+    val preferencesError by chatViewModel.preferencesError.collectAsStateWithLifecycle()
     val unreadDmIds by chatViewModel.unreadDmIds.collectAsStateWithLifecycle()
     val messages = conversationState.messages
     val typingUsers = conversationState.typingUsers
@@ -76,7 +80,11 @@ fun MainScreen(
     val messageError = conversationState.error
     val isUploadingAttachment = conversationState.isUploadingAttachment
     val friendState by friendViewModel.uiState.collectAsStateWithLifecycle()
-    val dms = friendState.dms
+    val dmSummaries by chatViewModel.dmSummaries.collectAsStateWithLifecycle()
+    val dmPreferences by chatViewModel.dmPreferences.collectAsStateWithLifecycle()
+    val dms = com.matteo.chatapp.viewmodel.orderedConversations(friendState.dms, dmSummaries, dmPreferences)
+    var showArchived by remember { mutableStateOf(false) }
+    val listedDms = dms.filter { it.archived == showArchived }
     val selectedDm = friendState.selectedDm
     val profile = friendState.profile
     val viewedProfile = friendState.viewedProfile
@@ -91,7 +99,6 @@ fun MainScreen(
     val isAppInForeground by AppVisibility.isInForeground.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
-    var messageInput by remember { mutableStateOf("") }
     var replyingTo by remember { mutableStateOf<com.matteo.chatapp.model.Message?>(null) }
     var currentDestination by remember { mutableStateOf<MainDestination>(MainDestination.Friends) }
     var showProfileSettings by remember { mutableStateOf(false) }
@@ -104,10 +111,41 @@ fun MainScreen(
     var mobileSection by remember { mutableStateOf(MobileSection.FRIENDS) }
     var forceScrollChatKey by remember { mutableStateOf<String?>(null) }
     var highlightedMessageId by remember { mutableStateOf<String?>(null) }
+    val notificationDmId by com.matteo.chatapp.platform.NotificationNavigation.pendingDm.collectAsStateWithLifecycle()
+
+    LaunchedEffect(notificationDmId, dms) {
+        val dmId = notificationDmId ?: return@LaunchedEffect
+        val dm = dms.firstOrNull { it.id == dmId } ?: return@LaunchedEffect
+        mobileSection = MobileSection.MESSAGES
+        friendViewModel.selectDm(dm)
+        currentDestination = MainDestination.DirectMessage(dm)
+        forceScrollChatKey = "dm:${dm.id}"
+        chatViewModel.loadDmMessages(dm.id)
+        com.matteo.chatapp.platform.NotificationNavigation.consume(dmId)
+    }
     val activeChatKey = when (val destination = currentDestination) {
         is MainDestination.DirectMessage -> "dm:${destination.dm.id}"
         is MainDestination.ServerChat -> selectedChannel?.id?.let { "channel:$it" }
         MainDestination.Friends -> null
+    }
+
+    val draftOwner = SessionManager.getEmail().orEmpty()
+    var messageInput by remember(draftOwner, activeChatKey) {
+        mutableStateOf(activeChatKey?.let { com.matteo.chatapp.repository.DraftStorage.load(draftOwner, it) }.orEmpty())
+    }
+    fun updateDraft(text: String) {
+        messageInput = text
+        activeChatKey?.let { com.matteo.chatapp.repository.DraftStorage.save(draftOwner, it, text) }
+    }
+    val inboxRevision by chatViewModel.inboxRevision.collectAsStateWithLifecycle()
+    LaunchedEffect(inboxRevision, isAppInForeground) {
+        if (isAppInForeground) {
+            chatViewModel.refreshConversation()
+            friendViewModel.loadAll()
+        }
+    }
+    LaunchedEffect(dmSummaries.keys, friendState.dms.map { it.id }) {
+        if (dmSummaries.keys.any { id -> friendState.dms.none { it.id == id } }) friendViewModel.loadAll()
     }
 
     LaunchedEffect(activeChatKey, selectedDm?.id, isAppInForeground) {
@@ -123,9 +161,7 @@ fun MainScreen(
         selectedChannel?.let { chatViewModel.loadMessages(it.id) }
     }
 
-    LaunchedEffect(dms.map { it.id to it.hasUnread }) {
-        chatViewModel.restoreUnreadDms(dms.filter { it.hasUnread }.mapTo(mutableSetOf()) { it.id })
-    }
+    LaunchedEffect(friendState.dms) { chatViewModel.restoreDmSummaries(friendState.dms) }
 
     LaunchedEffect(serverViewModel) {
         serverViewModel.accessRevoked.collect { serverId ->
@@ -138,14 +174,15 @@ fun MainScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
+    LaunchedEffect(messages.size, conversationState.pendingMessages.size) {
         val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         val totalItems = listState.layoutInfo.totalItemsCount
         val isNearBottom = totalItems == 0 || lastVisibleIndex >= totalItems - 4
         val shouldForceScroll = activeChatKey != null && forceScrollChatKey == activeChatKey
-        if (messages.isNotEmpty() && (shouldForceScroll || isNearBottom)) {
+        if ((messages.isNotEmpty() || conversationState.pendingMessages.isNotEmpty()) &&
+            (shouldForceScroll || isNearBottom || conversationState.pendingMessages.any { it.status == com.matteo.chatapp.viewmodel.SendStatus.SENDING })) {
             val dateSeparatorCount = messages.mapNotNull { it.createdAt?.take(10) }.distinct().size
-            val targetIndex = (messages.size + dateSeparatorCount - 1).coerceAtLeast(0)
+            val targetIndex = (messages.size + dateSeparatorCount + conversationState.pendingMessages.size - 1).coerceAtLeast(0)
             listState.animateScrollToItem(targetIndex)
             if (shouldForceScroll) forceScrollChatKey = null
         }
@@ -194,6 +231,11 @@ fun MainScreen(
         replyingTo = replyingTo,
         messageInput = messageInput,
         isUploadingAttachment = isUploadingAttachment,
+        pendingMessages = conversationState.pendingMessages,
+        isLoading = conversationState.isLoading,
+        isConnected = conversationState.isConnected,
+        isSyncing = conversationState.isSyncing,
+        loadError = conversationState.loadError,
         avatarUrl = avatarUrl,
         online = online,
         typingText = typingUsers[typingKey]?.let { "$it esta escribiendo..." },
@@ -207,27 +249,33 @@ fun MainScreen(
         onProfileClick: (() -> Unit)? = null
     ) = ChatAreaActions(
         onLoadOlder = chatViewModel::loadOlderMessages,
+        onRetryMessage = chatViewModel::retryMessage,
+        onDiscardMessage = chatViewModel::discardPendingMessage,
+        onRefresh = chatViewModel::refreshConversation,
         onEditMessage = chatViewModel::editMessage,
         onDeleteMessage = chatViewModel::deleteMessage,
         onReplyMessage = { replyingTo = it },
         onCancelReply = { replyingTo = null },
         onInputChange = { text ->
-            messageInput = text
+            updateDraft(text.take(4000))
             onTyping(text)
         },
         onSendAttachment = { file, clearSelection ->
-            chatViewModel.sendAttachment(file, messageInput, replyingTo?.id) {
-                messageInput = ""
-                replyingTo = null
+            val content = messageInput
+            val reply = replyingTo?.id
+            chatViewModel.sendAttachment(file, content, reply) {
+                if (messageInput == content) updateDraft("")
+                if (replyingTo?.id == reply) replyingTo = null
                 clearSelection()
             }
         },
         onSend = {
             val content = messageInput
             if (content.isNotBlank()) {
-                onSendText(content, replyingTo?.id) {
-                    messageInput = ""
-                    replyingTo = null
+                val reply = replyingTo?.id
+                onSendText(content, reply) {
+                    if (messageInput == content) updateDraft("")
+                    if (replyingTo?.id == reply) replyingTo = null
                 }
             }
         },
@@ -237,7 +285,9 @@ fun MainScreen(
     )
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Background).windowInsetsPadding(WindowInsets.safeDrawing)) {
-    val isMobile = maxWidth < 760.dp
+    val isMobile = maxWidth < 840.dp
+    val sidebarWidth = (maxWidth * 0.22f).coerceIn(232.dp, 280.dp)
+    val navigationKey = activeChatKey ?: "${mobileSection}:${selectedServer?.id}:${currentDestination}"
     PlatformBackHandler(
         enabled = isMobile && (
             currentDestination is MainDestination.DirectMessage ||
@@ -277,7 +327,7 @@ fun MainScreen(
             currentDestination is MainDestination.ServerChat
         }
         Column(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().then(contentEntrance(navigationKey))) {
                 when {
                     openDm != null -> {
                         val dm = openDm
@@ -346,7 +396,6 @@ fun MainScreen(
                                 forceScrollChatKey = "dm:${dm.id}"
                                 chatViewModel.loadDmMessages(dm.id)
                             },
-                            onViewProfile = { friendViewModel.loadUserProfile(it) },
                             viewModel = friendViewModel
                         )
                     }
@@ -361,15 +410,19 @@ fun MainScreen(
                                 friendViewModel.logout(onLogout)
                             }
                         )
-                        if (dms.isEmpty()) {
+                        TextButton(onClick = { showArchived = !showArchived }) {
+                            Text(if (showArchived) "Volver a mensajes" else "Archivados (${dms.count { it.archived }})")
+                        }
+                        if (listedDms.isEmpty()) {
                             EmptyState("No hay conversaciones")
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
-                                items(dms, key = { it.id }) { dm ->
+                                items(listedDms, key = { it.id }) { dm ->
                                     DirectMessageRow(
                                         dm = dm,
                                         selected = false,
                                         hasUnread = unreadDmIds.contains(dm.id),
+                                        onPreferences = { chatViewModel.updateDmPreferences(dm.id, it) },
                                         onClick = {
                                             friendViewModel.selectDm(dm)
                                             currentDestination = MainDestination.DirectMessage(dm)
@@ -475,7 +528,7 @@ fun MainScreen(
             }
         }
     } else {
-    Row(modifier = Modifier.fillMaxSize()) {
+    Row(modifier = Modifier.fillMaxSize().background(Navigation).padding(top = 12.dp, end = 12.dp, bottom = 12.dp)) {
         Column(
             modifier = Modifier
                 .width(72.dp)
@@ -549,19 +602,24 @@ fun MainScreen(
 
         Column(
             modifier = Modifier
-                .width(276.dp)
+                .width(sidebarWidth)
                 .fillMaxHeight()
+                .clip(RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
                 .background(Surface)
         ) {
             when (currentDestination) {
                 is MainDestination.Friends, is MainDestination.DirectMessage -> {
                     SidebarHeader(title = "Mensajes directos", subtitle = "${dms.size} conversaciones")
+                    TextButton(onClick = { showArchived = !showArchived }) {
+                        Text(if (showArchived) "Volver a mensajes" else "Archivados (${dms.count { it.archived }})")
+                    }
                     LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        items(dms, key = { it.id }) { dm ->
+                        items(listedDms, key = { it.id }) { dm ->
                             DirectMessageRow(
                                 dm = dm,
                                 selected = selectedDm?.id == dm.id,
                                 hasUnread = unreadDmIds.contains(dm.id),
+                                onPreferences = { chatViewModel.updateDmPreferences(dm.id, it) },
                                 onClick = {
                                     friendViewModel.selectDm(dm)
                                     currentDestination = MainDestination.DirectMessage(dm)
@@ -613,7 +671,9 @@ fun MainScreen(
         }
 
         Column(
-            modifier = Modifier.weight(1f).fillMaxHeight().background(Background)
+            modifier = Modifier.weight(1f).fillMaxHeight()
+                .clip(RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp))
+                .background(Background).then(contentEntrance(navigationKey))
         ) {
             when (currentDestination) {
                 is MainDestination.Friends -> {
@@ -623,9 +683,6 @@ fun MainScreen(
                             currentDestination = MainDestination.DirectMessage(dm)
                             forceScrollChatKey = "dm:${dm.id}"
                             chatViewModel.loadDmMessages(dm.id)
-                        },
-                        onViewProfile = { userId ->
-                            friendViewModel.loadUserProfile(userId)
                         },
                         viewModel = friendViewModel
                     )
@@ -684,17 +741,35 @@ fun MainScreen(
 
     }
 
+    var showPasswordChanged by remember { mutableStateOf(false) }
+    preferencesError?.let { error ->
+        AlertDialog(onDismissRequest = chatViewModel::clearPreferencesError,
+            title = { Text("Opciones de conversación") }, text = { Text(error) },
+            confirmButton = { TextButton(onClick = chatViewModel::clearPreferencesError) { Text("Aceptar") } })
+    }
+    if (showPasswordChanged) {
+        AlertDialog(
+            onDismissRequest = onLogout,
+            title = { Text("Contraseña actualizada") },
+            text = { Text("Tu nueva contraseña se ha guardado. Inicia sesión de nuevo para continuar.") },
+            confirmButton = { TextButton(onClick = onLogout) { Text("Ir al inicio de sesión") } }
+        )
+    }
     if (showProfileSettings) {
         ProfileSettingsDialog(
             username = profile?.username ?: SessionManager.getUsername().orEmpty(),
             avatarUrl = profile?.avatarUrl.orEmpty(),
             bannerUrl = profile?.profileBannerUrl.orEmpty(),
             status = profile?.status.orEmpty(),
+            bio = profile?.bio.orEmpty(),
             email = profile?.email ?: SessionManager.getEmail().orEmpty(),
             error = friendError,
+            passwordError = friendState.passwordError,
+            changingPassword = friendState.changingPassword,
+            savingProfile = friendState.savingProfile,
             onDismiss = { showProfileSettings = false },
-            onSave = { username, status, avatarFile, bannerFile ->
-                friendViewModel.saveProfile(username, status, avatarFile, bannerFile) {
+            onSave = { username, status, bio, avatarFile, bannerFile ->
+                friendViewModel.saveProfile(username, status, bio, avatarFile, bannerFile) {
                     showProfileSettings = false
                 }
             },
@@ -702,7 +777,8 @@ fun MainScreen(
                 friendViewModel.changePassword(currentPassword, newPassword) {
                     showProfileSettings = false
                     chatViewModel.disconnectRealtime()
-                    onLogout()
+                    friendViewModel.disconnectRealtime()
+                    showPasswordChanged = true
                 }
             }
         )
@@ -851,18 +927,15 @@ fun MainScreen(
     }
 
     viewedProfile?.let { user ->
+        val sharedDm = dms.firstOrNull { it.otherUserId == user.id }
         PublicProfileDialog(
             profile = user,
             onDismiss = { friendViewModel.clearViewedProfile() },
-            onOpenDm = {
-                friendViewModel.openDm(user.id) { dm ->
-                    friendViewModel.clearViewedProfile()
-                    friendViewModel.selectDm(dm)
-                    currentDestination = MainDestination.DirectMessage(dm)
-                    forceScrollChatKey = "dm:${dm.id}"
-                    chatViewModel.loadDmMessages(dm.id)
-                }
-            }
+            onSharedItems = sharedDm?.let { dm -> { chatViewModel.openSharedItems(dm.id) } }
         )
+    }
+    sharedItems.dmId?.let { dmId ->
+        SharedItemsDialog(sharedItems, onTab = { chatViewModel.openSharedItems(dmId, it) },
+            onMore = chatViewModel::loadMoreSharedItems, onDismiss = chatViewModel::closeSharedItems)
     }
 }

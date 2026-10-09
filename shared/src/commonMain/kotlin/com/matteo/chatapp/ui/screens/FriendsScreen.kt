@@ -1,5 +1,9 @@
 package com.matteo.chatapp.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,11 +12,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PersonAddAlt
-import androidx.compose.material.icons.rounded.PersonOutline
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,7 +32,6 @@ import com.matteo.chatapp.viewmodel.FriendViewModel
 @Composable
 fun FriendsScreen(
     onOpenDm: (DmConversation) -> Unit,
-    onViewProfile: (String) -> Unit,
     viewModel: FriendViewModel
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -41,29 +42,32 @@ fun FriendsScreen(
 
     var searchUsername by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("En linea", "Todos", "Pendientes", "Anadir")
+    val tabs = listOf("En línea", "Todos", "Pendientes", "Añadir")
 
     LaunchedEffect(Unit) {
         viewModel.loadAll()
     }
 
     Column(modifier = Modifier.fillMaxSize().background(Background)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp)) {
-            Text("Amigos", color = OnBackground, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp)) {
+            Text("Tu gente", color = OnBackground, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("${friends.count { it.friendIsOnline }} en línea · ${friends.size} amigos", color = Muted, fontSize = 13.sp)
+            Spacer(Modifier.height(20.dp))
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 tabs.forEachIndexed { index, tab ->
                     val selected = selectedTab == index
+                    val tabBackground by animateColorAsState(if (selected) PrimarySoft else androidx.compose.ui.graphics.Color.Transparent, tween(140))
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (selected) PrimarySoft else androidx.compose.ui.graphics.Color.Transparent)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(tabBackground)
                             .clickable { selectedTab = index }
-                            .padding(horizontal = 13.dp, vertical = 8.dp)
+                            .padding(horizontal = 14.dp, vertical = 14.dp)
                     ) {
                         Text(
                             tab,
-                            color = if (selected) OnBackground else OnSurface,
+                            color = if (selected) Primary else OnSurface,
                             fontSize = 13.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                         )
@@ -78,18 +82,17 @@ fun FriendsScreen(
             Text(it, color = Error, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp))
         }
 
+        Box(Modifier.weight(1f).fillMaxWidth().then(contentEntrance(selectedTab))) {
         when (selectedTab) {
             0 -> FriendsList(
                 friends = friends.filter { it.friendIsOnline },
                 emptyText = "No hay amigos conectados",
-                onOpenDm = { viewModel.openDm(it.friendId, onOpenDm) },
-                onViewProfile = { onViewProfile(it.friendId) }
+                onOpenDm = { viewModel.openDm(it.friendId, onOpenDm) }
             )
             1 -> FriendsList(
                 friends = friends,
                 emptyText = "Aun no tienes amigos",
-                onOpenDm = { viewModel.openDm(it.friendId, onOpenDm) },
-                onViewProfile = { onViewProfile(it.friendId) }
+                onOpenDm = { viewModel.openDm(it.friendId, onOpenDm) }
             )
             2 -> PendingList(
                 pending = pending,
@@ -101,8 +104,10 @@ fun FriendsScreen(
                 onSearchChange = { searchUsername = it },
                 onSearch = { viewModel.searchUser(searchUsername) },
                 searchResult = searchResult,
+                isSearching = state.isSearchingUser,
                 onSendRequest = { viewModel.sendFriendRequest(it) }
             )
+        }
         }
     }
 }
@@ -111,8 +116,7 @@ fun FriendsScreen(
 fun FriendsList(
     friends: List<FriendRequest>,
     emptyText: String,
-    onOpenDm: (FriendRequest) -> Unit,
-    onViewProfile: (FriendRequest) -> Unit
+    onOpenDm: (FriendRequest) -> Unit
 ) {
     if (friends.isEmpty()) {
         EmptyFriendsState(emptyText)
@@ -126,8 +130,7 @@ fun FriendsList(
                 avatarUrl = friend.friendAvatar,
                 description = if (friend.friendIsOnline) "En linea" else "Desconectado",
                 online = friend.friendIsOnline,
-                onOpenDm = { onOpenDm(friend) },
-                onViewProfile = { onViewProfile(friend) }
+                onOpenDm = { onOpenDm(friend) }
             )
         }
     }
@@ -184,6 +187,7 @@ fun AddFriendTab(
     onSearchChange: (String) -> Unit,
     onSearch: () -> Unit,
     searchResult: com.matteo.chatapp.model.UserProfile?,
+    isSearching: Boolean = false,
     onSendRequest: (String) -> Unit
 ) {
     Column(
@@ -215,9 +219,11 @@ fun AddFriendTab(
             )
             IconButton(
                 onClick = onSearch,
+                enabled = searchUsername.isNotBlank() && !isSearching,
                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Primary)
             ) {
-                Icon(Icons.Rounded.Search, contentDescription = "Buscar usuario", tint = OnPrimary)
+                if (isSearching) CircularProgressIndicator(Modifier.size(20.dp), color = OnPrimary, strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.Search, contentDescription = "Buscar usuario", tint = OnPrimary)
             }
         }
 
@@ -253,30 +259,22 @@ private fun FriendRow(
     avatarUrl: String?,
     description: String,
     online: Boolean,
-    onOpenDm: () -> Unit,
-    onViewProfile: () -> Unit
+    onOpenDm: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Surface.copy(alpha = 0.55f))
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .clickable(onClickLabel = "Abrir chat con $name", role = androidx.compose.ui.semantics.Role.Button, onClick = onOpenDm)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.clickable { onViewProfile() }) {
-            PresenceAvatar(name = name, avatarUrl = avatarUrl, online = online, size = 42)
-        }
+        PresenceAvatar(name = name, avatarUrl = avatarUrl, online = online, size = 42)
         Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f).clickable { onViewProfile() }) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(name, color = OnBackground, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Text(description, color = if (online) Accent else Muted, fontSize = 12.sp)
-        }
-        IconButton(onClick = onViewProfile, modifier = Modifier.size(38.dp)) {
-            Icon(Icons.Rounded.PersonOutline, contentDescription = "Ver perfil", tint = OnSurface, modifier = Modifier.size(19.dp))
-        }
-        IconButton(onClick = onOpenDm, modifier = Modifier.size(38.dp)) {
-            Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Enviar mensaje", tint = Primary, modifier = Modifier.size(19.dp))
         }
     }
 }
@@ -293,8 +291,8 @@ private fun RequestRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Surface.copy(alpha = 0.55f))
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -330,7 +328,5 @@ private fun SectionLabel(text: String, count: Int) {
 
 @Composable
 private fun EmptyFriendsState(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = Muted, fontSize = 14.sp)
-    }
+    EmptyState(text)
 }

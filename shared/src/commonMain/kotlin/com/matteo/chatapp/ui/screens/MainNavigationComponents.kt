@@ -1,7 +1,11 @@
 package com.matteo.chatapp.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -17,14 +21,18 @@ import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.PersonOutline
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import chat_app.shared.generated.resources.Res
@@ -48,7 +56,7 @@ internal fun MobileTopBar(
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(58.dp).background(Navigation).padding(horizontal = 6.dp),
+        modifier = Modifier.fillMaxWidth().height(64.dp).background(Background).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBack != null) {
@@ -68,22 +76,14 @@ internal fun MobileTopBar(
             }
             Spacer(Modifier.width(10.dp))
         }
-        Text(title, color = OnBackground, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+        Text(title, color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         actions()
         onSearch?.let {
-            IconButton(onClick = it, modifier = Modifier.size(38.dp)) {
+            IconButton(onClick = it, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.Search, contentDescription = "Buscar", tint = OnSurface, modifier = Modifier.size(19.dp))
             }
         }
-        IconButton(onClick = onProfile, modifier = Modifier.size(38.dp)) {
-            Icon(Icons.Rounded.PersonOutline, contentDescription = "Perfil", tint = OnSurface, modifier = Modifier.size(19.dp))
-        }
-        IconButton(onClick = onAppearance, modifier = Modifier.size(38.dp)) {
-            Icon(Icons.Rounded.Palette, contentDescription = "Apariencia", tint = OnSurface, modifier = Modifier.size(19.dp))
-        }
-        IconButton(onClick = onLogout, modifier = Modifier.size(38.dp)) {
-            Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = "Cerrar sesion", tint = Muted, modifier = Modifier.size(19.dp))
-        }
+        AccountMenu(onProfile, onAppearance, onLogout)
     }
     HorizontalDivider(color = Outline)
 }
@@ -94,7 +94,7 @@ internal fun MobileBottomNavigation(
     hasUnreadMessages: Boolean,
     onSelect: (MobileSection) -> Unit
 ) {
-    NavigationBar(containerColor = Navigation, tonalElevation = 0.dp) {
+    NavigationBar(containerColor = Surface, tonalElevation = 0.dp) {
         NavigationBarItem(
             selected = selected == MobileSection.FRIENDS,
             onClick = { onSelect(MobileSection.FRIENDS) },
@@ -137,7 +137,7 @@ internal fun MobileServerRow(server: Server, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(Surface)
             .clickable { onClick() }
             .padding(12.dp),
@@ -161,6 +161,8 @@ internal fun RailAction(
     badge: String? = null,
     onClick: () -> Unit
 ) {
+    val background by animateColorAsState(if (selected) PrimarySoft else Surface, tween(140))
+    val corner by animateDpAsState(if (selected) 14.dp else 22.dp, tween(160))
     Box(
         modifier = Modifier.width(72.dp).height(48.dp),
         contentAlignment = Alignment.CenterStart
@@ -178,15 +180,15 @@ internal fun RailAction(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(44.dp)
-                .clip(RoundedCornerShape(if (selected) 12.dp else 22.dp))
-                .background(if (selected) Primary else SurfaceElevated)
+                .clip(RoundedCornerShape(corner))
+                .background(background)
                 .clickable { onClick() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = if (selected) OnPrimary else OnSurface,
+                tint = if (selected) Primary else OnSurface,
                 modifier = Modifier.size(21.dp)
             )
         }
@@ -215,9 +217,9 @@ internal fun SidebarHeader(
     action: String? = null,
     onAction: () -> Unit = {}
 ) {
-    Column(modifier = Modifier.fillMaxWidth().height(82.dp).padding(horizontal = 16.dp, vertical = 13.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp).padding(horizontal = 20.dp, vertical = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = OnBackground, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(title, color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             action?.let {
                 IconButton(onClick = onAction, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Rounded.Settings, contentDescription = it, tint = OnSurface, modifier = Modifier.size(19.dp))
@@ -242,35 +244,67 @@ internal fun SidebarSectionLabel(text: String) {
 }
 
 @Composable
-internal fun DirectMessageRow(dm: DmConversation, selected: Boolean, hasUnread: Boolean, onClick: () -> Unit) {
+internal fun DirectMessageRow(dm: DmConversation, selected: Boolean, hasUnread: Boolean, onClick: () -> Unit,
+    onPreferences: (com.matteo.chatapp.model.DmPreferencesRequest) -> Unit = {}) {
+    val background by animateColorAsState(if (selected) PrimarySoft else Color.Transparent, tween(140))
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) SurfaceVariant else Color.Transparent)
+            .clip(RoundedCornerShape(14.dp))
+            .background(background)
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 9.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PresenceAvatar(name = dm.otherUsername, avatarUrl = dm.otherAvatar, online = dm.otherIsOnline, size = 34)
+        PresenceAvatar(name = dm.otherUsername, avatarUrl = dm.otherAvatar, online = dm.otherIsOnline, size = 40)
         Spacer(Modifier.width(10.dp))
-        Text(
-            dm.otherUsername,
-            color = if (selected) OnBackground else OnSurface,
-            fontSize = 14.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            modifier = Modifier.weight(1f)
-        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(dm.otherUsername, color = OnBackground, fontSize = 15.sp,
+                    modifier = Modifier.weight(1f, fill = false),
+                    fontWeight = if (selected || hasUnread) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (dm.pinned) Icon(Icons.Rounded.PushPin, "Conversación fijada", tint = Primary, modifier = Modifier.size(14.dp))
+                if (dm.muted) Icon(Icons.Rounded.NotificationsOff, "Silenciada", tint = Muted, modifier = Modifier.size(14.dp))
+            }
+            Text(dm.lastMessagePreview ?: if (hasUnread) "Mensajes nuevos" else if (dm.otherIsOnline) "En línea" else "Desconectado",
+                color = if (hasUnread) Primary else OnSurface, fontSize = 13.sp, lineHeight = 18.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        dm.lastMessageAt?.let { at -> Text(conversationTimeLabel(at), color = Muted, fontSize = 11.sp) }
         if (hasUnread) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(Primary)
-            )
+            Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Primary).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                Text(if (dm.unreadCount > 99) "99+" else dm.unreadCount.coerceAtLeast(1).toString(), color = OnPrimary, fontSize = 10.sp)
+            }
+        }
+        }
+        Box {
+            var expanded by remember { mutableStateOf(false) }
+            IconButton(onClick = { expanded = true }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.MoreVert, "Opciones de conversación", tint = Muted, modifier = Modifier.size(20.dp))
+            }
+            DropdownMenu(expanded, onDismissRequest = { expanded = false }, containerColor = Surface) {
+                DropdownMenuItem(text = { Text(if (dm.pinned) "Desfijar" else "Fijar conversación") }, onClick = {
+                    expanded = false; onPreferences(com.matteo.chatapp.model.DmPreferencesRequest(pinned = !dm.pinned))
+                })
+                DropdownMenuItem(text = { Text(if (dm.muted) "Activar notificaciones" else "Silenciar") }, onClick = {
+                    expanded = false; onPreferences(com.matteo.chatapp.model.DmPreferencesRequest(muted = !dm.muted))
+                })
+                DropdownMenuItem(text = { Text(if (dm.archived) "Desarchivar" else "Archivar") }, onClick = {
+                    expanded = false; onPreferences(com.matteo.chatapp.model.DmPreferencesRequest(archived = !dm.archived))
+                })
+            }
         }
     }
+}
+
+private fun conversationTimeLabel(timestamp: String): String {
+    val today = kotlin.time.Clock.System.now().toString().take(10)
+    return if (timestamp.take(10) == today) timestamp.substringAfter('T').take(5)
+    else timestamp.take(10).split('-').let { if (it.size == 3) "${it[2]}/${it[1]}" else "" }
 }
 
 @Composable
@@ -292,18 +326,10 @@ internal fun UserFooter(
         PresenceAvatar(name = username.ifBlank { "?" }, avatarUrl = avatarUrl, online = true, size = 34)
         Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f).clickable { onSettings() }) {
-            Text(username, color = OnBackground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(status.ifBlank { "Disponible" }, color = Accent, fontSize = 11.sp)
+            Text(username, color = OnBackground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(status.ifBlank { "Disponible" }, color = Accent, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = onSettings, modifier = Modifier.size(34.dp)) {
-            Icon(Icons.Rounded.PersonOutline, contentDescription = "Ajustes de perfil", tint = OnSurface, modifier = Modifier.size(18.dp))
-        }
-        IconButton(onClick = onAppearanceSettings, modifier = Modifier.size(34.dp)) {
-            Icon(Icons.Rounded.Palette, contentDescription = "Apariencia", tint = OnSurface, modifier = Modifier.size(18.dp))
-        }
-        IconButton(onClick = onLogout, modifier = Modifier.size(34.dp)) {
-            Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = "Cerrar sesion", tint = Muted, modifier = Modifier.size(18.dp))
-        }
+        AccountMenu(onSettings, onAppearanceSettings, onLogout)
     }
 }
 
@@ -313,10 +339,33 @@ internal fun PresenceAvatar(name: String, avatarUrl: String? = null, online: Boo
         AvatarImage(avatarUrl = avatarUrl, name = name, size = size)
         Box(
             modifier = Modifier
-                .size((size / 3).dp)
+                .size((size / 4).dp)
                 .clip(CircleShape)
                 .background(if (online) Accent else Muted)
+                .border(2.dp, Surface, CircleShape)
                 .align(Alignment.BottomEnd)
         )
+    }
+}
+
+@Composable
+private fun AccountMenu(onProfile: () -> Unit, onAppearance: () -> Unit, onLogout: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.Rounded.PersonOutline, contentDescription = "Mi cuenta y ajustes", tint = OnSurface)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = Surface) {
+            DropdownMenuItem(text = { Text("Mi perfil") },
+                leadingIcon = { Icon(Icons.Rounded.PersonOutline, null) },
+                onClick = { expanded = false; onProfile() })
+            DropdownMenuItem(text = { Text("Apariencia") },
+                leadingIcon = { Icon(Icons.Rounded.Palette, null) },
+                onClick = { expanded = false; onAppearance() })
+            HorizontalDivider(color = Outline)
+            DropdownMenuItem(text = { Text("Cerrar sesión", color = Error) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Logout, null, tint = Error) },
+                onClick = { expanded = false; onLogout() })
+        }
     }
 }

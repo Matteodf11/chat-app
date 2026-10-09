@@ -6,6 +6,8 @@ import com.matteo.chatapp.network.WebSocketClient
 import kotlinx.coroutines.flow.Flow
 
 interface ConversationEventsSource {
+    val readEvents: Flow<com.matteo.chatapp.model.DmReadEvent> get() = kotlinx.coroutines.flow.emptyFlow()
+    val connected: Flow<Boolean> get() = kotlinx.coroutines.flow.flowOf(false)
     val messages: Flow<Message>
     val typingEvents: Flow<TypingEvent>
 
@@ -21,6 +23,9 @@ interface ConversationEventsSource {
 }
 
 interface PersonalMessagesSource {
+    val readEvents: Flow<com.matteo.chatapp.model.DmReadEvent> get() = kotlinx.coroutines.flow.emptyFlow()
+    val settings: Flow<com.matteo.chatapp.model.DmConversation> get() = kotlinx.coroutines.flow.emptyFlow()
+    val connected: Flow<Boolean> get() = kotlinx.coroutines.flow.flowOf(false)
     val messages: Flow<Message>
 
     suspend fun connect(token: String)
@@ -29,6 +34,7 @@ interface PersonalMessagesSource {
 }
 
 interface DmInboxEventsSource {
+    val readEvents: Flow<com.matteo.chatapp.model.DmReadEvent> get() = kotlinx.coroutines.flow.emptyFlow()
     val messages: Flow<Message>
 
     suspend fun connect(token: String, dmIds: List<String>)
@@ -39,6 +45,8 @@ interface DmInboxEventsSource {
 class WebSocketConversationEventsSource(
     private val client: WebSocketClient
 ) : ConversationEventsSource {
+    override val readEvents = client.readEvents
+    override val connected: Flow<Boolean> = client.connected
     override val messages: Flow<Message> = client.incomingMessages
     override val typingEvents: Flow<TypingEvent> = client.typingEvents
 
@@ -65,6 +73,9 @@ class WebSocketConversationEventsSource(
 class WebSocketPersonalMessagesSource(
     private val client: WebSocketClient
 ) : PersonalMessagesSource {
+    override val readEvents = client.readEvents
+    override val settings = client.dmSettings
+    override val connected: Flow<Boolean> = client.connected
     override val messages: Flow<Message> = client.personalMessages
 
     override suspend fun connect(token: String) {
@@ -79,6 +90,7 @@ class WebSocketPersonalMessagesSource(
 class WebSocketDmInboxEventsSource(
     private val client: WebSocketClient
 ) : DmInboxEventsSource {
+    override val readEvents = client.readEvents
     override val messages: Flow<Message> = client.personalMessages
 
     override suspend fun connect(token: String, dmIds: List<String>) {

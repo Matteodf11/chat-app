@@ -11,7 +11,9 @@ data class UserProfile(
     val profileBannerUrl: String? = null,
     val status: String? = null,
     val profileColor: String? = null,
-    val isOnline: Boolean = false
+    val isOnline: Boolean = false,
+    val bio: String? = null,
+    val createdAt: String? = null
 )
 
 @Serializable
@@ -20,7 +22,8 @@ data class UpdateProfileRequest(
     val avatarUrl: String? = null,
     val profileBannerUrl: String? = null,
     val status: String? = null,
-    val profileColor: String? = null
+    val profileColor: String? = null,
+    val bio: String? = null
 )
 
 @Serializable
@@ -30,5 +33,6 @@ data class ProfileEvent(
     val avatarUrl: String? = null,
     val profileBannerUrl: String? = null,
     val status: String? = null,
-    val profileColor: String? = null
+    val profileColor: String? = null,
+    val bio: String? = null
 )

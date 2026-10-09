@@ -1,5 +1,8 @@
 package com.matteo.chatapp.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
@@ -21,6 +24,8 @@ import com.matteo.chatapp.ui.theme.Muted
 import com.matteo.chatapp.ui.theme.OnBackground
 import com.matteo.chatapp.ui.theme.OnSurface
 import com.matteo.chatapp.ui.theme.SurfaceVariant
+import com.matteo.chatapp.ui.theme.Primary
+import com.matteo.chatapp.ui.theme.PrimarySoft
 
 @Composable
 fun ChannelItem(
@@ -28,23 +33,26 @@ fun ChannelItem(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val background by animateColorAsState(if (isSelected) PrimarySoft else androidx.compose.ui.graphics.Color.Transparent, tween(140))
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) SurfaceVariant else androidx.compose.ui.graphics.Color.Transparent)
+            .clip(RoundedCornerShape(12.dp))
+            .background(background)
             .clickable { onClick() }
-            .padding(horizontal = 11.dp, vertical = 9.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("#", color = if (isSelected) OnBackground else Muted, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("#", color = if (isSelected) Primary else Muted, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(8.dp))
         Text(
             text = channel.name,
             color = if (isSelected) OnBackground else OnSurface,
             fontSize = 14.sp,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }

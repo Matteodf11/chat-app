@@ -50,7 +50,7 @@ class FriendUiStateTest {
         )
 
         val updated = initial.withProfileEvent(
-            ProfileEvent(userId = "user-1", username = "Despues", avatarUrl = "/avatar.png")
+            ProfileEvent(userId = "user-1", username = "Despues", avatarUrl = "/avatar.png", bio = "Mi descripción")
         )
 
         assertEquals("Despues", updated.friends.single().friendUsername)
@@ -58,6 +58,7 @@ class FriendUiStateTest {
         assertEquals("Despues", updated.selectedDm?.otherUsername)
         assertEquals("Despues", updated.viewedProfile?.username)
         assertEquals("/avatar.png", updated.viewedProfile?.avatarUrl)
+        assertEquals("Mi descripción", updated.viewedProfile?.bio)
     }
 
     @Test

@@ -1,6 +1,11 @@
 package com.matteo.chatapp.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -13,10 +18,10 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.PersonOutline
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tag
@@ -60,6 +65,11 @@ internal data class ChatAreaState(
     val replyingTo: Message?,
     val messageInput: String,
     val isUploadingAttachment: Boolean,
+    val pendingMessages: List<com.matteo.chatapp.viewmodel.PendingMessage> = emptyList(),
+    val isLoading: Boolean = false,
+    val isConnected: Boolean = false,
+    val isSyncing: Boolean = false,
+    val loadError: String? = null,
     val avatarUrl: String? = null,
     val online: Boolean? = null,
     val typingText: String? = null,
@@ -75,6 +85,9 @@ internal data class ChatAreaActions(
     val onInputChange: (String) -> Unit,
     val onSendAttachment: (PickedAttachmentFile, () -> Unit) -> Unit,
     val onSend: () -> Unit,
+    val onRetryMessage: (String) -> Unit,
+    val onDiscardMessage: (String) -> Unit,
+    val onRefresh: () -> Unit,
     val onBack: (() -> Unit)? = null,
     val onSearch: (() -> Unit)? = null,
     val onProfileClick: (() -> Unit)? = null
@@ -119,10 +132,11 @@ internal fun ChatArea(
     var recordingSeconds by remember(destinationKey) { mutableStateOf(0) }
     var recordingError by remember(destinationKey) { mutableStateOf<String?>(null) }
     val canSend = (messageInput.isNotBlank() || pendingAttachment != null) && !isUploadingAttachment && !isRecordingVoice
+    val sendColor by animateColorAsState(if (canSend) Primary else SurfaceVariant, tween(120))
     val sendCurrent = {
         val attachment = pendingAttachment
         if (attachment != null) {
-            onSendAttachment(attachment) { pendingAttachment = null }
+            onSendAttachment(attachment) { if (pendingAttachment === attachment) pendingAttachment = null }
         } else {
             onSend()
         }
@@ -156,17 +170,27 @@ internal fun ChatArea(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().imePadding()) {
+    Column(modifier = Modifier.fillMaxSize().imePadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(72.dp).background(Background).padding(horizontal = 20.dp),
+            modifier = Modifier.fillMaxWidth().height(68.dp).background(Background).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             onBack?.let {
-                IconButton(onClick = it, modifier = Modifier.size(38.dp)) {
+                IconButton(onClick = it, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Volver", tint = OnSurface, modifier = Modifier.size(20.dp))
                 }
                 Spacer(Modifier.width(6.dp))
             }
+            Row(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                    .then(if (onProfileClick != null) Modifier.clickable(
+                        onClickLabel = "Ver perfil de $title",
+                        role = androidx.compose.ui.semantics.Role.Button,
+                        onClick = onProfileClick
+                    ) else Modifier)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             if (online != null) {
                 PresenceAvatar(name = title, avatarUrl = avatarUrl, online = online, size = 38)
             } else {
@@ -179,7 +203,7 @@ internal fun ChatArea(
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = OnBackground, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(title, color = OnBackground, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 Spacer(Modifier.height(3.dp))
                 Text(
                     typingText ?: subtitle,
@@ -189,19 +213,31 @@ internal fun ChatArea(
                     maxLines = 1
                 )
             }
+            }
             onSearch?.let {
                 IconButton(onClick = it, modifier = Modifier.size(38.dp)) {
                     Icon(Icons.Rounded.Search, contentDescription = "Buscar mensajes", tint = OnSurface, modifier = Modifier.size(20.dp))
                 }
             }
-            onProfileClick?.let {
-                IconButton(onClick = it, modifier = Modifier.size(38.dp)) {
-                    Icon(Icons.Rounded.PersonOutline, contentDescription = "Ver perfil", tint = OnSurface, modifier = Modifier.size(20.dp))
-                }
-            }
         }
         HorizontalDivider(color = Outline)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).padding(vertical = 10.dp)) {
+        if (!state.isConnected || state.isSyncing || state.loadError != null) {
+            Row(Modifier.fillMaxWidth().background(SurfaceVariant).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(state.loadError ?: if (state.isSyncing) "Actualizando mensajes…" else "Reconectando…",
+                    modifier = Modifier.weight(1f), color = if (state.loadError != null) Error else Muted, fontSize = 12.sp)
+                TextButton(onClick = actions.onRefresh, enabled = !state.isSyncing) { Text("Reintentar") }
+            }
+        }
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).widthIn(max = 1000.dp).fillMaxWidth(), contentPadding = PaddingValues(vertical = 16.dp)) {
+            if (messages.isEmpty() && state.pendingMessages.isEmpty()) {
+                item(key = "empty-conversation") {
+                    Box(Modifier.fillParentMaxHeight().fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        if (state.isLoading) CircularProgressIndicator(Modifier.size(24.dp), color = Primary)
+                        else EmptyState(if (state.loadError != null) "No se pudieron cargar los mensajes" else "Aquí empieza la conversación")
+                    }
+                }
+            }
             if (isLoadingOlder) {
                 item(key = "loading-older") {
                     Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
@@ -238,7 +274,31 @@ internal fun ChatArea(
                     )
                 }
             }
+            state.pendingMessages.forEach { pending ->
+                item(key = "pending-${pending.id}") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(SurfaceVariant).padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        pending.replyToId?.let { Text("Respuesta a un mensaje", color = Muted, fontSize = 11.sp) }
+                        if (pending.content.isNotEmpty()) Text(pending.content, color = OnBackground, fontSize = 14.sp)
+                        pending.file?.let { Text(it.fileName, color = OnSurface, fontSize = 12.sp) }
+                        if (pending.status == com.matteo.chatapp.viewmodel.SendStatus.SENDING) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CircularProgressIndicator(Modifier.size(12.dp), color = Muted, strokeWidth = 1.dp)
+                                Text("Enviando…", color = Muted, fontSize = 11.sp)
+                            }
+                        } else {
+                            Text(pending.error ?: "No se pudo confirmar el envío", color = Error, fontSize = 12.sp)
+                            Row {
+                                TextButton(onClick = { actions.onRetryMessage(pending.id) }) { Text("Reintentar") }
+                                TextButton(onClick = { actions.onDiscardMessage(pending.id) }) { Text("Descartar") }
+                            }
+                        }
+                    }
+                }
+            }
         }
+        Column(Modifier.widthIn(max = 1000.dp).fillMaxWidth().animateContentSize(tween(160))) {
         if (messageError != null || recordingError != null) {
             Text(
                 text = messageError ?: recordingError.orEmpty(),
@@ -310,27 +370,18 @@ internal fun ChatArea(
                 }) { Text("Cancelar", color = Muted) }
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().background(Background).padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
+                .clip(RoundedCornerShape(20.dp)).background(Surface)
+                .border(1.dp, Outline, RoundedCornerShape(20.dp)).padding(6.dp)
         ) {
-            IconButton(
-                onClick = {
-                    scope.launch { pickAttachmentFile()?.let { pendingAttachment = it } }
-                },
-                enabled = !isUploadingAttachment && !isRecordingVoice,
-                modifier = Modifier.size(42.dp)
-            ) {
-                Icon(Icons.Rounded.AttachFile, contentDescription = "Adjuntar archivo", tint = OnSurface)
-            }
             OutlinedTextField(
                 value = messageInput,
                 onValueChange = onInputChange,
                 enabled = !isRecordingVoice,
                 placeholder = { Text("Escribe un mensaje", color = Muted) },
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .onPreviewKeyEvent { event ->
                         if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
                             if (canSend) sendCurrent()
@@ -339,15 +390,15 @@ internal fun ChatArea(
                             false
                         }
                     },
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(14.dp),
                 singleLine = false,
                 minLines = 1,
                 maxLines = 5,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { if (canSend) sendCurrent() }),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Primary,
-                    unfocusedBorderColor = Outline,
+                    focusedBorderColor = Primary.copy(alpha = 0.5f),
+                    unfocusedBorderColor = Color.Transparent,
                     focusedTextColor = OnBackground,
                     unfocusedTextColor = OnBackground,
                     cursorColor = Primary,
@@ -355,6 +406,16 @@ internal fun ChatArea(
                     unfocusedContainerColor = Surface
                 )
             )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(
+                onClick = { scope.launch { pickAttachmentFile()?.let { pendingAttachment = it } } },
+                enabled = !isUploadingAttachment && !isRecordingVoice,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Rounded.AttachFile, contentDescription = "Adjuntar archivo", tint = OnSurface)
+            }
+            Spacer(Modifier.weight(1f))
             IconButton(
                 onClick = {
                     scope.launch {
@@ -381,9 +442,9 @@ internal fun ChatArea(
                 },
                 enabled = !isUploadingAttachment,
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isRecordingVoice) Error else SurfaceVariant)
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (isRecordingVoice) Error else Color.Transparent)
             ) {
                 Icon(
                     if (isRecordingVoice) Icons.Rounded.Stop else Icons.Rounded.Mic,
@@ -394,7 +455,7 @@ internal fun ChatArea(
             IconButton(
                 onClick = sendCurrent,
                 enabled = canSend,
-                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(if (canSend) Primary else SurfaceVariant)
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(sendColor)
             ) {
                 if (isUploadingAttachment) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Muted)
@@ -402,6 +463,8 @@ internal fun ChatArea(
                     Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Enviar mensaje", tint = if (canSend) OnPrimary else Muted)
                 }
             }
+            }
+        }
         }
     }
 }
@@ -435,6 +498,13 @@ private fun DateSeparator(date: String) {
 @Composable
 internal fun EmptyState(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = OnSurface, fontSize = 15.sp)
+        Column(Modifier.widthIn(max = 320.dp).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(64.dp).clip(RoundedCornerShape(22.dp)).background(PrimarySoft), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = Primary, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(text, color = OnBackground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
     }
 }

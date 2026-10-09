@@ -23,6 +23,8 @@ data class MessageSearchQuery(
 )
 
 interface ChatRepository {
+    suspend fun sharedItems(dmId: String, kind: String, before: String?): com.matteo.chatapp.model.SharedItemsPage =
+        error("Galería no disponible")
     suspend fun loadMessages(
         target: ConversationTarget,
         before: String? = null
@@ -31,14 +33,16 @@ interface ChatRepository {
     suspend fun sendMessage(
         target: ConversationTarget,
         content: String,
-        replyToId: String?
+        replyToId: String?,
+        clientMessageId: String? = null
     ): Message
 
     suspend fun sendAttachment(
         target: ConversationTarget,
         file: PickedAttachmentFile,
         content: String,
-        replyToId: String?
+        replyToId: String?,
+        clientMessageId: String? = null
     ): Message
 
     suspend fun searchMessages(
@@ -53,6 +57,9 @@ interface ChatRepository {
     suspend fun deleteMessage(messageId: String)
 
     suspend fun markDmRead(dmId: String)
+    suspend fun markDmReadThrough(dmId: String, messageId: String) { markDmRead(dmId) }
+    suspend fun updatePreferences(dmId: String, value: com.matteo.chatapp.model.DmPreferencesRequest): com.matteo.chatapp.model.DmConversation =
+        error("Preferencias no disponibles")
 }
 
 class NetworkChatRepository(
@@ -60,6 +67,13 @@ class NetworkChatRepository(
     private val friendApi: FriendApi,
     private val accessTokenProvider: AccessTokenProvider
 ) : ChatRepository {
+    override suspend fun sharedItems(dmId: String, kind: String, before: String?) =
+        messageApi.sharedItems(dmId, kind, before, accessTokenProvider.requireToken())
+    override suspend fun markDmReadThrough(dmId: String, messageId: String) {
+        friendApi.markDmRead(dmId, accessTokenProvider.requireToken(), messageId)
+    }
+    override suspend fun updatePreferences(dmId: String, value: com.matteo.chatapp.model.DmPreferencesRequest) =
+        friendApi.updatePreferences(dmId, value, accessTokenProvider.requireToken())
     override suspend fun loadMessages(
         target: ConversationTarget,
         before: String?
@@ -76,14 +90,15 @@ class NetworkChatRepository(
     override suspend fun sendMessage(
         target: ConversationTarget,
         content: String,
-        replyToId: String?
+        replyToId: String?,
+        clientMessageId: String?
     ): Message {
         val token = accessTokenProvider.requireToken()
         return when (target) {
             is ConversationTarget.Channel ->
-                messageApi.sendMessage(target.id, content, replyToId, token)
+                messageApi.sendMessage(target.id, content, replyToId, token, clientMessageId)
             is ConversationTarget.DirectMessage ->
-                messageApi.sendDmMessage(target.id, content, replyToId, token)
+                messageApi.sendDmMessage(target.id, content, replyToId, token, clientMessageId)
         }
     }
 
@@ -91,14 +106,15 @@ class NetworkChatRepository(
         target: ConversationTarget,
         file: PickedAttachmentFile,
         content: String,
-        replyToId: String?
+        replyToId: String?,
+        clientMessageId: String?
     ): Message {
         val token = accessTokenProvider.requireToken()
         return when (target) {
             is ConversationTarget.Channel ->
-                messageApi.sendChannelAttachment(target.id, file, content, replyToId, token)
+                messageApi.sendChannelAttachment(target.id, file, content, replyToId, token, clientMessageId)
             is ConversationTarget.DirectMessage ->
-                messageApi.sendDmAttachment(target.id, file, content, replyToId, token)
+                messageApi.sendDmAttachment(target.id, file, content, replyToId, token, clientMessageId)
         }
     }
 

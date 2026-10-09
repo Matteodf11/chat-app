@@ -14,7 +14,11 @@ data class FriendUiState(
     val profile: UserProfile? = null,
     val searchResult: UserProfile? = null,
     val viewedProfile: UserProfile? = null,
-    val error: String? = null
+    val error: String? = null,
+    val passwordError: String? = null,
+    val changingPassword: Boolean = false,
+    val savingProfile: Boolean = false,
+    val isSearchingUser: Boolean = false
 )
 
 internal fun FriendUiState.withPresenceEvent(event: PresenceEvent): FriendUiState = copy(
@@ -97,7 +101,8 @@ private fun UserProfile.withProfileEvent(event: ProfileEvent): UserProfile =
             avatarUrl = event.avatarUrl,
             profileBannerUrl = event.profileBannerUrl,
             status = event.status,
-            profileColor = event.profileColor
+            profileColor = event.profileColor,
+            bio = event.bio
         )
     } else {
         this
