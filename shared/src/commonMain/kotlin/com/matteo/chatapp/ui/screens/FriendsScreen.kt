@@ -22,7 +22,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.matteo.chatapp.model.DmConversation
 import com.matteo.chatapp.model.FriendRequest
 import com.matteo.chatapp.ui.theme.*
@@ -32,12 +31,13 @@ import com.matteo.chatapp.viewmodel.FriendViewModel
 fun FriendsScreen(
     onOpenDm: (DmConversation) -> Unit,
     onViewProfile: (String) -> Unit,
-    viewModel: FriendViewModel = viewModel { FriendViewModel() }
+    viewModel: FriendViewModel
 ) {
-    val friends by viewModel.friends.collectAsStateWithLifecycle()
-    val pending by viewModel.pendingRequests.collectAsStateWithLifecycle()
-    val searchResult by viewModel.searchResult.collectAsStateWithLifecycle()
-    val error by viewModel.error.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val friends = state.friends
+    val pending = state.pendingRequests
+    val searchResult = state.searchResult
+    val error = state.error
 
     var searchUsername by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(0) }

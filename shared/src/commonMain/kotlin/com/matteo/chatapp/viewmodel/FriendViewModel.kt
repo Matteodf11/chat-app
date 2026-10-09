@@ -5,58 +5,47 @@ import androidx.lifecycle.viewModelScope
 import com.matteo.chatapp.model.DmConversation
 import com.matteo.chatapp.model.FriendRequest
 import com.matteo.chatapp.model.ProfileEvent
-import com.matteo.chatapp.model.UpdateProfileRequest
-import com.matteo.chatapp.model.UserProfile
-import com.matteo.chatapp.network.FriendApi
-import com.matteo.chatapp.network.AuthApi
-import com.matteo.chatapp.network.UserApi
-import com.matteo.chatapp.network.WebSocketClient
-import com.matteo.chatapp.network.createHttpClient
 import com.matteo.chatapp.platform.PickedAvatarFile
-import com.matteo.chatapp.repository.SessionManager
+import com.matteo.chatapp.repository.AccessTokenProvider
+import com.matteo.chatapp.repository.AuthRepository
+import com.matteo.chatapp.repository.FriendRepository
+import com.matteo.chatapp.repository.FriendshipEventsSource
+import com.matteo.chatapp.repository.PresenceEventsSource
+import com.matteo.chatapp.repository.ProfileEventsSource
+import com.matteo.chatapp.repository.ProfileRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class FriendViewModel : ViewModel() {
-
-    private val client = createHttpClient()
-    private val friendApi = FriendApi(client)
-    private val userApi = UserApi(client)
-    private val authApi = AuthApi(client)
-    private val friendshipWsClient = WebSocketClient(client)
-    private val presenceWsClient = WebSocketClient(client)
-    private val profileWsClient = WebSocketClient(client)
+class FriendViewModel(
+    private val friendRepository: FriendRepository,
+    private val profileRepository: ProfileRepository,
+    private val authRepository: AuthRepository,
+    private val accessTokenProvider: AccessTokenProvider,
+    private val friendshipEventsSource: FriendshipEventsSource,
+    private val presenceEventsSource: PresenceEventsSource,
+    private val profileEventsSource: ProfileEventsSource
+) : ViewModel() {
     private var friendEventsJob: Job? = null
     private var presenceEventsJob: Job? = null
     private var profileEventsJob: Job? = null
+    private var friendEventsCollectJob: Job? = null
+    private var presenceEventsCollectJob: Job? = null
+    private var profileEventsCollectJob: Job? = null
+    private var profileOperationJob: Job? = null
+    private var loadAllJob: Job? = null
+    private var userSearchJob: Job? = null
+    private var viewedProfileJob: Job? = null
+    private var openDmJob: Job? = null
 
-    private val _friends = MutableStateFlow<List<FriendRequest>>(emptyList())
-    val friends: StateFlow<List<FriendRequest>> = _friends
-
-    private val _pendingRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
-    val pendingRequests: StateFlow<List<FriendRequest>> = _pendingRequests
-
-    private val _dms = MutableStateFlow<List<DmConversation>>(emptyList())
-    val dms: StateFlow<List<DmConversation>> = _dms
-
-    private val _selectedDm = MutableStateFlow<DmConversation?>(null)
-    val selectedDm: StateFlow<DmConversation?> = _selectedDm
-
-    private val _profile = MutableStateFlow<UserProfile?>(null)
-    val profile: StateFlow<UserProfile?> = _profile
-
-    private val _searchResult = MutableStateFlow<UserProfile?>(null)
-    val searchResult: StateFlow<UserProfile?> = _searchResult
-
-    private val _viewedProfile = MutableStateFlow<UserProfile?>(null)
-    val viewedProfile: StateFlow<UserProfile?> = _viewedProfile
-
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error
+    private val _uiState = MutableStateFlow(FriendUiState())
+    val uiState: StateFlow<FriendUiState> = _uiState.asStateFlow()
 
     init {
         loadProfile()
@@ -67,81 +56,59 @@ class FriendViewModel : ViewModel() {
     }
 
     fun loadProfile() {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
+        profileOperationJob?.cancel()
+        profileOperationJob = viewModelScope.launch {
             try {
-                val profile = userApi.getMyProfile(token)
-                _profile.value = profile
-                SessionManager.saveUserId(profile.id)
+                val profile = profileRepository.loadMyProfile()
+                _uiState.update { it.copy(profile = profile, error = null) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo cargar tu perfil"
-            }
-        }
-    }
-
-    fun updateProfile(username: String, avatarUrl: String, status: String) {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
-            try {
-                val updated = userApi.updateMyProfile(
-                    UpdateProfileRequest(
-                        username = username.trim().takeIf { it.isNotBlank() },
-                        avatarUrl = avatarUrl.trim().takeIf { it.isNotBlank() },
-                        status = status.trim().takeIf { it.isNotBlank() },
-                        profileColor = null
-                    ),
-                    token
-                )
-                _profile.value = updated
-                SessionManager.saveSession(token, updated.username, updated.email, updated.id)
-                _error.value = null
-            } catch (e: Exception) {
-                _error.value = "No se pudo actualizar el perfil"
+                _uiState.update { it.copy(error = "No se pudo cargar tu perfil") }
             }
         }
     }
 
     fun saveProfile(username: String, status: String, avatarFile: PickedAvatarFile?, bannerFile: PickedAvatarFile?, onComplete: () -> Unit = {}) {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
+        profileOperationJob?.cancel()
+        profileOperationJob = viewModelScope.launch {
             try {
-                var updated = userApi.updateMyProfile(
-                    UpdateProfileRequest(
-                        username = username.trim().takeIf { it.isNotBlank() },
-                        avatarUrl = null,
-                        profileBannerUrl = null,
-                        status = status.trim().takeIf { it.isNotBlank() },
-                        profileColor = null
-                    ),
-                    token
+                val updated = profileRepository.saveProfile(
+                    username = username,
+                    status = status,
+                    avatarFile = avatarFile,
+                    bannerFile = bannerFile
                 )
-                if (avatarFile != null) {
-                    updated = userApi.uploadAvatar(avatarFile.fileName, avatarFile.contentType, avatarFile.bytes, token)
-                }
-                if (bannerFile != null) {
-                    updated = userApi.uploadBanner(bannerFile.fileName, bannerFile.contentType, bannerFile.bytes, token)
-                }
-                _profile.value = updated
-                SessionManager.saveSession(token, updated.username, updated.email, updated.id)
+                _uiState.update { it.copy(profile = updated, error = null) }
                 loadAll()
-                _error.value = null
                 onComplete()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = e.message?.takeIf { it.isNotBlank() } ?: "No se pudo guardar el perfil"
+                _uiState.update {
+                    it.copy(error = e.message?.takeIf(String::isNotBlank) ?: "No se pudo guardar el perfil")
+                }
             }
         }
     }
 
     fun loadAll() {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
+        loadAllJob?.cancel()
+        loadAllJob = viewModelScope.launch {
             try {
-                _friends.value = friendApi.getFriends(token)
-                _pendingRequests.value = friendApi.getPendingRequests(token)
-                _dms.value = friendApi.getMyDms(token)
-                _error.value = null
+                val snapshot = friendRepository.loadSnapshot()
+                _uiState.update {
+                    it.copy(
+                        friends = snapshot.friends,
+                        pendingRequests = snapshot.pendingRequests,
+                        dms = snapshot.dms,
+                        error = null
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudieron cargar amigos y solicitudes"
+                _uiState.update { it.copy(error = "No se pudieron cargar amigos y solicitudes") }
             }
         }
     }
@@ -149,8 +116,8 @@ class FriendViewModel : ViewModel() {
     private fun connectFriendEvents() {
         if (friendEventsJob != null) return
 
-        viewModelScope.launch {
-            friendshipWsClient.friendshipEvents.collect { event ->
+        friendEventsCollectJob = viewModelScope.launch {
+            friendshipEventsSource.events.collect { event ->
                 applyFriendshipEvent(event.type, event.friendship)
             }
         }
@@ -158,11 +125,9 @@ class FriendViewModel : ViewModel() {
         friendEventsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    val userId = SessionManager.getUserId() ?: userApi.getMyProfile(token).id.also {
-                        SessionManager.saveUserId(it)
-                    }
-                    friendshipWsClient.connectFriendEvents(token, userId)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    val userId = profileRepository.getCurrentUserId()
+                    friendshipEventsSource.connect(token, userId)
                 } catch (e: Exception) {
                     delay(2500)
                 }
@@ -173,28 +138,17 @@ class FriendViewModel : ViewModel() {
     private fun connectPresenceEvents() {
         if (presenceEventsJob != null) return
 
-        viewModelScope.launch {
-            presenceWsClient.presenceEvents.collect { event ->
-                _friends.value = _friends.value.map {
-                    if (it.friendId == event.userId) it.copy(friendIsOnline = event.online) else it
-                }
-                _pendingRequests.value = _pendingRequests.value.map {
-                    if (it.friendId == event.userId) it.copy(friendIsOnline = event.online) else it
-                }
-                _dms.value = _dms.value.map {
-                    if (it.otherUserId == event.userId) it.copy(otherIsOnline = event.online) else it
-                }
-                _selectedDm.value = _selectedDm.value?.let {
-                    if (it.otherUserId == event.userId) it.copy(otherIsOnline = event.online) else it
-                }
+        presenceEventsCollectJob = viewModelScope.launch {
+            presenceEventsSource.events.collect { event ->
+                _uiState.update { it.withPresenceEvent(event) }
             }
         }
 
         presenceEventsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    presenceWsClient.connectPresenceEvents(token)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    presenceEventsSource.connect(token)
                 } catch (e: Exception) {
                     delay(2500)
                 }
@@ -205,8 +159,8 @@ class FriendViewModel : ViewModel() {
     private fun connectProfileEvents() {
         if (profileEventsJob != null) return
 
-        viewModelScope.launch {
-            profileWsClient.profileEvents.collect { event ->
+        profileEventsCollectJob = viewModelScope.launch {
+            profileEventsSource.events.collect { event ->
                 applyProfileEvent(event)
             }
         }
@@ -214,8 +168,8 @@ class FriendViewModel : ViewModel() {
         profileEventsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    profileWsClient.connectProfileEvents(token)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    profileEventsSource.connect(token)
                 } catch (e: Exception) {
                     delay(2500)
                 }
@@ -224,143 +178,119 @@ class FriendViewModel : ViewModel() {
     }
 
     private fun applyProfileEvent(event: ProfileEvent) {
-        _profile.value = _profile.value?.let {
-            if (it.id == event.userId) {
-                val updated = it.copy(
-                    username = event.username,
-                    avatarUrl = event.avatarUrl,
-                    profileBannerUrl = event.profileBannerUrl,
-                    status = event.status,
-                    profileColor = event.profileColor
-                )
-                SessionManager.getToken()?.let { token ->
-                    SessionManager.saveSession(token, updated.username, updated.email, updated.id)
-                }
-                updated
-            } else {
-                it
-            }
-        }
-
-        _viewedProfile.value = _viewedProfile.value?.let {
-            if (it.id == event.userId) {
-                it.copy(
-                    username = event.username,
-                    avatarUrl = event.avatarUrl,
-                    profileBannerUrl = event.profileBannerUrl,
-                    status = event.status,
-                    profileColor = event.profileColor
-                )
-            } else {
-                it
-            }
-        }
-
-        _friends.value = _friends.value.map {
-            if (it.friendId == event.userId) {
-                it.copy(friendUsername = event.username, friendAvatar = event.avatarUrl)
-            } else {
-                it
-            }
-        }
-        _pendingRequests.value = _pendingRequests.value.map {
-            if (it.friendId == event.userId) {
-                it.copy(friendUsername = event.username, friendAvatar = event.avatarUrl)
-            } else {
-                it
-            }
-        }
-        _dms.value = _dms.value.map {
-            if (it.otherUserId == event.userId) {
-                it.copy(otherUsername = event.username, otherAvatar = event.avatarUrl)
-            } else {
-                it
-            }
-        }
-        _selectedDm.value = _selectedDm.value?.let {
-            if (it.otherUserId == event.userId) {
-                it.copy(otherUsername = event.username, otherAvatar = event.avatarUrl)
-            } else {
-                it
-            }
-        }
+        _uiState.update { it.withProfileEvent(event) }
+        _uiState.value.profile
+            ?.takeIf { it.id == event.userId }
+            ?.let(profileRepository::cacheCurrentProfile)
     }
 
     private fun applyFriendshipEvent(type: String, friendship: FriendRequest) {
         when (type) {
             "friend_request_created" -> {
-                _pendingRequests.value = (_pendingRequests.value.filterNot { it.id == friendship.id } + friendship)
+                _uiState.update {
+                    it.copy(pendingRequests = it.pendingRequests.upsertFriendship(friendship))
+                }
             }
             "friend_request_accepted" -> {
-                _pendingRequests.value = _pendingRequests.value.filterNot { it.id == friendship.id }
-                _friends.value = (_friends.value.filterNot { it.id == friendship.id } + friendship)
+                _uiState.update {
+                    it.copy(
+                        pendingRequests = it.pendingRequests.filterNot { request ->
+                            request.id == friendship.id
+                        },
+                        friends = it.friends.upsertFriendship(friendship)
+                    )
+                }
             }
             "friend_request_rejected" -> {
-                _pendingRequests.value = _pendingRequests.value.filterNot { it.id == friendship.id }
+                _uiState.update {
+                    it.copy(
+                        pendingRequests = it.pendingRequests.filterNot { request ->
+                            request.id == friendship.id
+                        }
+                    )
+                }
             }
             else -> loadAll()
         }
     }
 
     fun searchUser(username: String) {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
+        userSearchJob?.cancel()
+        userSearchJob = viewModelScope.launch {
             val cleanUsername = username.trim()
             if (cleanUsername.isBlank()) {
-                _searchResult.value = null
-                _error.value = "Escribe un nombre de usuario"
+                _uiState.update {
+                    it.copy(searchResult = null, error = "Escribe un nombre de usuario")
+                }
                 return@launch
             }
             try {
-                _searchResult.value = userApi.getUserByUsername(cleanUsername, token)
-                _error.value = null
+                val result = profileRepository.findUser(cleanUsername)
+                _uiState.update { it.copy(searchResult = result, error = null) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "Usuario no encontrado"
-                _searchResult.value = null
+                _uiState.update { it.copy(searchResult = null, error = "Usuario no encontrado") }
             }
         }
     }
 
     fun loadUserProfile(userId: String) {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
+        viewedProfileJob?.cancel()
+        viewedProfileJob = viewModelScope.launch {
             try {
-                _viewedProfile.value = userApi.getUserById(userId, token)
-                _error.value = null
+                val profile = profileRepository.getUser(userId)
+                _uiState.update { it.copy(viewedProfile = profile, error = null) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo cargar el perfil"
+                _uiState.update { it.copy(error = "No se pudo cargar el perfil") }
             }
         }
     }
 
     fun clearViewedProfile() {
-        _viewedProfile.value = null
+        viewedProfileJob?.cancel()
+        viewedProfileJob = null
+        _uiState.update { it.copy(viewedProfile = null) }
     }
 
     fun sendFriendRequest(userId: String) {
         viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
             try {
-                val request = friendApi.sendFriendRequest(userId, token)
-                _pendingRequests.value = (_pendingRequests.value.filterNot { it.id == request.id } + request)
-                _searchResult.value = null
-                _error.value = null
+                val request = friendRepository.sendFriendRequest(userId)
+                _uiState.update {
+                    it.copy(
+                        pendingRequests = it.pendingRequests.upsertFriendship(request),
+                        searchResult = null,
+                        error = null
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "Error al enviar solicitud"
+                _uiState.update { it.copy(error = "Error al enviar solicitud") }
             }
         }
     }
 
     fun acceptRequest(friendshipId: String) {
         viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
             try {
-                val accepted = friendApi.acceptRequest(friendshipId, token)
-                _pendingRequests.value = _pendingRequests.value.filterNot { it.id == friendshipId }
-                _friends.value = (_friends.value.filterNot { it.id == accepted.id } + accepted)
-                _error.value = null
+                val accepted = friendRepository.acceptRequest(friendshipId)
+                _uiState.update {
+                    it.copy(
+                        pendingRequests = it.pendingRequests.filterNot { request ->
+                            request.id == friendshipId
+                        },
+                        friends = it.friends.upsertFriendship(accepted),
+                        error = null
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo aceptar la solicitud"
+                _uiState.update { it.copy(error = "No se pudo aceptar la solicitud") }
                 loadAll()
             }
         }
@@ -368,55 +298,77 @@ class FriendViewModel : ViewModel() {
 
     fun rejectRequest(friendshipId: String) {
         viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
             try {
-                friendApi.rejectRequest(friendshipId, token)
-                _pendingRequests.value = _pendingRequests.value.filterNot { it.id == friendshipId }
-                _error.value = null
+                friendRepository.rejectRequest(friendshipId)
+                _uiState.update {
+                    it.copy(
+                        pendingRequests = it.pendingRequests.filterNot { request ->
+                            request.id == friendshipId
+                        },
+                        error = null
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo rechazar la solicitud"
+                _uiState.update { it.copy(error = "No se pudo rechazar la solicitud") }
                 loadAll()
             }
         }
     }
 
     fun openDm(otherUserId: String, onOpened: (DmConversation) -> Unit = {}) {
-        viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
+        openDmJob?.cancel()
+        openDmJob = viewModelScope.launch {
             try {
-                val dm = friendApi.getOrCreateDm(otherUserId, token).copy(hasUnread = false)
-                _selectedDm.value = dm
-                _dms.value = (_dms.value.filterNot { it.id == dm.id } + dm)
-                runCatching { friendApi.markDmRead(dm.id, token) }
-                _error.value = null
+                val dm = friendRepository.openDm(otherUserId).copy(hasUnread = false)
+                _uiState.update {
+                    it.copy(selectedDm = dm, dms = it.dms.upsertDm(dm), error = null)
+                }
+                markDmRead(dm.id)
+                openDmJob = null
                 onOpened(dm)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo abrir el mensaje directo"
+                _uiState.update { it.copy(error = "No se pudo abrir el mensaje directo") }
             }
         }
     }
 
     fun selectDm(dm: DmConversation) {
+        openDmJob?.cancel()
+        openDmJob = null
         val readDm = dm.copy(hasUnread = false)
-        _selectedDm.value = readDm
-        _dms.value = _dms.value.map { if (it.id == dm.id) readDm else it }
+        _uiState.update {
+            it.copy(selectedDm = readDm, dms = it.dms.upsertDm(readDm))
+        }
         viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
-            runCatching { friendApi.markDmRead(dm.id, token) }
+            markDmRead(dm.id)
         }
     }
 
     fun clearSelectedDm() {
-        _selectedDm.value = null
+        openDmJob?.cancel()
+        openDmJob = null
+        _uiState.update { it.copy(selectedDm = null) }
     }
 
     fun disconnectRealtime() {
+        profileOperationJob?.cancel()
+        loadAllJob?.cancel()
+        userSearchJob?.cancel()
+        viewedProfileJob?.cancel()
+        openDmJob?.cancel()
         friendEventsJob?.cancel()
         presenceEventsJob?.cancel()
         profileEventsJob?.cancel()
-        friendshipWsClient.disconnect()
-        presenceWsClient.disconnect()
-        profileWsClient.disconnect()
+        friendEventsCollectJob?.cancel()
+        presenceEventsCollectJob?.cancel()
+        profileEventsCollectJob?.cancel()
+        friendshipEventsSource.disconnect()
+        presenceEventsSource.disconnect()
+        profileEventsSource.disconnect()
     }
 
     fun logout(onComplete: () -> Unit) {
@@ -429,13 +381,24 @@ class FriendViewModel : ViewModel() {
     fun changePassword(currentPassword: String, newPassword: String, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                authApi.changePassword(currentPassword, newPassword, token)
-                _error.value = null
+                authRepository.changePassword(currentPassword, newPassword)
+                _uiState.update { it.copy(error = null) }
                 onComplete()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo cambiar la contrasena"
+                _uiState.update { it.copy(error = "No se pudo cambiar la contrasena") }
             }
+        }
+    }
+
+    private suspend fun markDmRead(dmId: String) {
+        try {
+            friendRepository.markDmRead(dmId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // El estado local ya se ha actualizado; el servidor podra sincronizarse despues.
         }
     }
 

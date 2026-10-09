@@ -8,7 +8,6 @@ import com.matteo.chatapp.model.ChangePasswordRequest
 import io.ktor.client.request.put
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -20,28 +19,28 @@ class AuthApi(private val client: HttpClient) {
         return client.post("$BASE_URL/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(request)
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun login(request: LoginRequest): AuthResponse {
         return client.post("$BASE_URL/auth/login") {
             contentType(ContentType.Application.Json)
             setBody(request)
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun refresh(refreshToken: String): AuthResponse {
         return client.post("$BASE_URL/auth/refresh") {
             contentType(ContentType.Application.Json)
             setBody(RefreshTokenRequest(refreshToken))
-        }.body()
+        }.bodyOrApiError()
     }
 
     suspend fun logout(refreshToken: String) {
         client.post("$BASE_URL/auth/logout") {
             contentType(ContentType.Application.Json)
             setBody(RefreshTokenRequest(refreshToken))
-        }
+        }.requireApiSuccess()
     }
 
     suspend fun changePassword(currentPassword: String, newPassword: String, token: String) {
@@ -49,6 +48,6 @@ class AuthApi(private val client: HttpClient) {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(ChangePasswordRequest(currentPassword, newPassword))
-        }
+        }.requireApiSuccess()
     }
 }

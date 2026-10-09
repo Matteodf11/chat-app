@@ -6,64 +6,44 @@ import com.matteo.chatapp.model.Message
 import com.matteo.chatapp.model.ProfileEvent
 import com.matteo.chatapp.model.TypingEvent
 import com.matteo.chatapp.platform.PickedAttachmentFile
-import com.matteo.chatapp.network.MessageApi
-import com.matteo.chatapp.network.FriendApi
-import com.matteo.chatapp.network.WebSocketClient
-import com.matteo.chatapp.network.createHttpClient
-import com.matteo.chatapp.repository.SessionManager
+import com.matteo.chatapp.repository.AccessTokenProvider
 import com.matteo.chatapp.repository.AppVisibility
+import com.matteo.chatapp.repository.ChatRepository
+import com.matteo.chatapp.repository.ConversationEventsSource
+import com.matteo.chatapp.repository.ConversationTarget
+import com.matteo.chatapp.repository.DmInboxEventsSource
+import com.matteo.chatapp.repository.MessageSearchQuery
+import com.matteo.chatapp.repository.PersonalMessagesSource
+import com.matteo.chatapp.repository.ProfileEventsSource
+import com.matteo.chatapp.repository.SessionIdentityProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class ChatViewModel : ViewModel() {
+class ChatViewModel(
+    private val chatRepository: ChatRepository,
+    private val accessTokenProvider: AccessTokenProvider,
+    private val sessionIdentityProvider: SessionIdentityProvider,
+    private val conversationEventsSource: ConversationEventsSource,
+    private val profileEventsSource: ProfileEventsSource,
+    private val personalMessagesSource: PersonalMessagesSource,
+    private val inboxEventsSource: DmInboxEventsSource
+) : ViewModel() {
 
-    private val client = createHttpClient()
-    private val api = MessageApi(client)
-    private val friendApi = FriendApi(client)
-    private val wsClient = WebSocketClient(client)
-    private val profileWsClient = WebSocketClient(client)
-    private val personalWsClient = WebSocketClient(client)
-    private val inboxWsClient = WebSocketClient(client)
-
-    private val _messages = MutableStateFlow<List<Message>>(emptyList())
-    val messages: StateFlow<List<Message>> = _messages
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
-
-    private val _isLoadingOlder = MutableStateFlow(false)
-    val isLoadingOlder: StateFlow<Boolean> = _isLoadingOlder
-
-    private val _hasOlderMessages = MutableStateFlow(false)
-    val hasOlderMessages: StateFlow<Boolean> = _hasOlderMessages
-
-    private val _messageError = MutableStateFlow<String?>(null)
-    val messageError: StateFlow<String?> = _messageError
-
-    private val _isUploadingAttachment = MutableStateFlow(false)
-    val isUploadingAttachment: StateFlow<Boolean> = _isUploadingAttachment
+    private val _conversationState = MutableStateFlow(ChatConversationUiState())
+    val conversationState: StateFlow<ChatConversationUiState> = _conversationState.asStateFlow()
 
     private val _unreadDmIds = MutableStateFlow<Set<String>>(emptySet())
-    val unreadDmIds: StateFlow<Set<String>> = _unreadDmIds
+    val unreadDmIds: StateFlow<Set<String>> = _unreadDmIds.asStateFlow()
 
-    private val _searchResults = MutableStateFlow<List<Message>>(emptyList())
-    val searchResults: StateFlow<List<Message>> = _searchResults
-
-    private val _isSearching = MutableStateFlow(false)
-    val isSearching: StateFlow<Boolean> = _isSearching
-
-    private val _searchError = MutableStateFlow<String?>(null)
-    val searchError: StateFlow<String?> = _searchError
-
-    private val _scrollTargetMessageId = MutableStateFlow<String?>(null)
-    val scrollTargetMessageId: StateFlow<String?> = _scrollTargetMessageId
-
-    private val _typingUsers = MutableStateFlow<Map<String, String>>(emptyMap())
-    val typingUsers: StateFlow<Map<String, String>> = _typingUsers
+    private val _searchState = MutableStateFlow(MessageSearchUiState())
+    val searchState: StateFlow<MessageSearchUiState> = _searchState.asStateFlow()
 
     private var wsJob: Job? = null
     private var messagesCollectJob: Job? = null
@@ -75,7 +55,11 @@ class ChatViewModel : ViewModel() {
     private var inboxJob: Job? = null
     private var inboxCollectJob: Job? = null
     private var typingStopJob: Job? = null
-    private var currentChannelId: String? = null
+    private var conversationLoadJob: Job? = null
+    private var olderMessagesJob: Job? = null
+    private var messageSearchJob: Job? = null
+    private val typingExpiryJobs = mutableMapOf<String, Job>()
+    private var activeConversation: ConversationTarget? = null
     private var visibleDmId: String? = null
     private var watchedDmIds: List<String> = emptyList()
 
@@ -85,21 +69,27 @@ class ChatViewModel : ViewModel() {
     }
 
     fun loadMessages(channelId: String) {
-        if (currentChannelId == "channel:$channelId") return
-        currentChannelId = "channel:$channelId"
+        val destination = ConversationTarget.Channel(channelId)
+        if (activeConversation == destination) return
+        activeConversation = destination
         resetRealtime()
 
-        viewModelScope.launch {
-            _isLoading.value = true
+        conversationLoadJob = viewModelScope.launch {
+            _conversationState.update { it.copy(isLoading = true) }
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val page = api.getChannelMessages(channelId, token)
-                _messages.value = page.messages
-                _hasOlderMessages.value = page.hasMore
+                val page = chatRepository.loadMessages(destination)
+                if (activeConversation != destination) return@launch
+                _conversationState.update {
+                    it.copy(messages = page.messages, hasOlderMessages = page.hasMore)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // error silencioso
             } finally {
-                _isLoading.value = false
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(isLoading = false) }
+                }
             }
         }
 
@@ -109,8 +99,8 @@ class ChatViewModel : ViewModel() {
         wsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    wsClient.connect(token, channelId)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    conversationEventsSource.connect(token, destination)
                 } catch (_: Exception) {}
                 if (isActive) delay(1500)
             }
@@ -118,22 +108,30 @@ class ChatViewModel : ViewModel() {
     }
 
     fun loadDmMessages(dmId: String) {
-        if (currentChannelId == "dm:$dmId") return
-        currentChannelId = "dm:$dmId"
+        val destination = ConversationTarget.DirectMessage(dmId)
+        if (activeConversation == destination) return
+        activeConversation = destination
         markDmRead(dmId)
         resetRealtime()
 
-        viewModelScope.launch {
-            _isLoading.value = true
+        conversationLoadJob = viewModelScope.launch {
+            _conversationState.update { it.copy(isLoading = true) }
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val page = api.getDmMessages(dmId, token)
-                _messages.value = page.messages
-                _hasOlderMessages.value = page.hasMore
+                val page = chatRepository.loadMessages(destination)
+                if (activeConversation != destination) return@launch
+                _conversationState.update {
+                    it.copy(messages = page.messages, hasOlderMessages = page.hasMore)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _messages.value = emptyList()
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(messages = emptyList()) }
+                }
             } finally {
-                _isLoading.value = false
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(isLoading = false) }
+                }
             }
         }
 
@@ -143,8 +141,8 @@ class ChatViewModel : ViewModel() {
         wsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    wsClient.connectDmMessages(token, dmId)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    conversationEventsSource.connect(token, destination)
                 } catch (_: Exception) {}
                 if (isActive) delay(1500)
             }
@@ -152,33 +150,41 @@ class ChatViewModel : ViewModel() {
     }
 
     fun sendDmMessage(content: String, dmId: String, replyToId: String? = null, onSent: () -> Unit = {}) {
+        val destination = ConversationTarget.DirectMessage(dmId)
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val message = api.sendDmMessage(dmId, content, replyToId, token)
+                val message = chatRepository.sendMessage(destination, content, replyToId)
+                if (activeConversation != destination) return@launch
                 appendMessage(message)
                 safeSendTyping(dmId = dmId, typing = false)
-                _messageError.value = null
+                _conversationState.update { it.copy(error = null) }
                 onSent()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                _messageError.value = "No se pudo enviar el mensaje"
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(error = "No se pudo enviar el mensaje") }
+                }
             }
         }
     }
 
     fun sendMessage(content: String, replyToId: String? = null, onSent: () -> Unit = {}) {
-        val channelId = currentChannelId?.removePrefix("channel:") ?: return
-        if (channelId == currentChannelId) return
+        val destination = activeConversation as? ConversationTarget.Channel ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val message = api.sendMessage(channelId, content, replyToId, token)
+                val message = chatRepository.sendMessage(destination, content, replyToId)
+                if (activeConversation != destination) return@launch
                 appendMessage(message)
-                safeSendTyping(channelId = channelId, typing = false)
-                _messageError.value = null
+                safeSendTyping(channelId = destination.id, typing = false)
+                _conversationState.update { it.copy(error = null) }
                 onSent()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                _messageError.value = "No se pudo enviar el mensaje"
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(error = "No se pudo enviar el mensaje") }
+                }
             }
         }
     }
@@ -189,49 +195,61 @@ class ChatViewModel : ViewModel() {
         replyToId: String? = null,
         onSent: () -> Unit = {}
     ) {
-        val destination = currentChannelId ?: return
-        if (_isUploadingAttachment.value) return
+        val destination = activeConversation ?: return
+        if (_conversationState.value.isUploadingAttachment) return
         viewModelScope.launch {
-            _isUploadingAttachment.value = true
+            _conversationState.update { it.copy(isUploadingAttachment = true) }
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val message = if (destination.startsWith("channel:")) {
-                    api.sendChannelAttachment(destination.removePrefix("channel:"), file, content, replyToId, token)
-                } else {
-                    api.sendDmAttachment(destination.removePrefix("dm:"), file, content, replyToId, token)
-                }
+                val message = chatRepository.sendAttachment(
+                    destination,
+                    file,
+                    content,
+                    replyToId
+                )
+                if (activeConversation != destination) return@launch
                 appendMessage(message)
-                _messageError.value = null
+                _conversationState.update { it.copy(error = null) }
                 onSent()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                _messageError.value = "No se pudo enviar el archivo"
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(error = "No se pudo enviar el archivo") }
+                }
             } finally {
-                _isUploadingAttachment.value = false
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(isUploadingAttachment = false) }
+                }
             }
         }
     }
 
     fun loadOlderMessages() {
-        val destination = currentChannelId ?: return
-        val before = _messages.value.firstOrNull()?.createdAt ?: return
-        if (_isLoadingOlder.value || !_hasOlderMessages.value) return
+        val destination = activeConversation ?: return
+        val currentState = _conversationState.value
+        val before = currentState.messages.firstOrNull()?.createdAt ?: return
+        if (currentState.isLoadingOlder || !currentState.hasOlderMessages) return
 
-        viewModelScope.launch {
-            _isLoadingOlder.value = true
+        olderMessagesJob?.cancel()
+        olderMessagesJob = viewModelScope.launch {
+            _conversationState.update { it.copy(isLoadingOlder = true) }
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val page = if (destination.startsWith("channel:")) {
-                    api.getChannelMessages(destination.removePrefix("channel:"), token, before)
-                } else {
-                    api.getDmMessages(destination.removePrefix("dm:"), token, before)
+                val page = chatRepository.loadMessages(destination, before)
+                if (activeConversation != destination) return@launch
+                _conversationState.update {
+                    it.copy(
+                        messages = it.messages.prependNewMessages(page.messages),
+                        hasOlderMessages = page.hasMore
+                    )
                 }
-                val existingIds = _messages.value.mapTo(mutableSetOf()) { it.id }
-                _messages.value = page.messages.filterNot { it.id in existingIds } + _messages.value
-                _hasOlderMessages.value = page.hasMore
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Se conserva la pagina actual y se permite reintentar al volver arriba.
             } finally {
-                _isLoadingOlder.value = false
+                if (activeConversation == destination) {
+                    _conversationState.update { it.copy(isLoadingOlder = false) }
+                }
             }
         }
     }
@@ -243,76 +261,102 @@ class ChatViewModel : ViewModel() {
         to: String,
         attachmentsOnly: Boolean
     ) {
-        val destination = currentChannelId ?: return
-        viewModelScope.launch {
-            _isSearching.value = true
-            _searchError.value = null
+        val destination = activeConversation ?: return
+        messageSearchJob?.cancel()
+        messageSearchJob = viewModelScope.launch {
+            _searchState.update { it.copy(isSearching = true, error = null) }
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                _searchResults.value = if (destination.startsWith("channel:")) {
-                    api.searchChannelMessages(
-                        destination.removePrefix("channel:"), query, sender, from, to, attachmentsOnly, token
+                val results = chatRepository.searchMessages(
+                    destination,
+                    MessageSearchQuery(
+                        text = query,
+                        sender = sender,
+                        from = from,
+                        to = to,
+                        attachmentsOnly = attachmentsOnly
                     )
-                } else {
-                    api.searchDmMessages(
-                        destination.removePrefix("dm:"), query, sender, from, to, attachmentsOnly, token
+                )
+                if (activeConversation != destination) return@launch
+                _searchState.update { it.copy(results = results) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _searchState.update {
+                    it.copy(
+                        results = emptyList(),
+                        error = e.message?.takeIf(String::isNotBlank) ?: "No se pudo completar la busqueda"
                     )
                 }
-            } catch (e: Exception) {
-                _searchResults.value = emptyList()
-                _searchError.value = e.message?.takeIf { it.isNotBlank() } ?: "No se pudo completar la busqueda"
             } finally {
-                _isSearching.value = false
+                if (activeConversation == destination) {
+                    _searchState.update { it.copy(isSearching = false) }
+                }
             }
         }
     }
 
     fun openSearchResult(messageId: String) {
-        viewModelScope.launch {
+        val destination = activeConversation ?: return
+        messageSearchJob?.cancel()
+        messageSearchJob = viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val page = api.getMessageContext(messageId, token)
-                _messages.value = page.messages
-                _hasOlderMessages.value = page.hasMore
-                _scrollTargetMessageId.value = messageId
+                val page = chatRepository.getMessageContext(messageId)
+                if (activeConversation != destination) return@launch
+                _conversationState.update {
+                    it.copy(messages = page.messages, hasOlderMessages = page.hasMore)
+                }
+                _searchState.update { it.copy(scrollTargetMessageId = messageId) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _searchError.value = "No se pudo abrir el mensaje"
+                _searchState.update { it.copy(error = "No se pudo abrir el mensaje") }
             }
         }
     }
 
     fun clearMessageSearch() {
-        _searchResults.value = emptyList()
-        _searchError.value = null
+        messageSearchJob?.cancel()
+        messageSearchJob = null
+        _searchState.value = MessageSearchUiState()
     }
 
     fun consumeScrollTarget(messageId: String) {
-        if (_scrollTargetMessageId.value == messageId) _scrollTargetMessageId.value = null
+        _searchState.update {
+            if (it.scrollTargetMessageId == messageId) it.copy(scrollTargetMessageId = null) else it
+        }
     }
 
     fun editMessage(messageId: String, content: String) {
+        val destination = activeConversation ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                applyMessageChange(api.editMessage(messageId, content, token))
+                val editedMessage = chatRepository.editMessage(messageId, content)
+                if (activeConversation == destination) applyMessageChange(editedMessage)
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {}
         }
     }
 
     fun deleteMessage(messageId: String) {
+        val destination = activeConversation ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                api.deleteMessage(messageId, token)
-                _messages.value = _messages.value.filterNot { it.id == messageId }
+                chatRepository.deleteMessage(messageId)
+                if (activeConversation == destination) {
+                    _conversationState.update {
+                        it.copy(messages = it.messages.filterNot { message -> message.id == messageId })
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {}
         }
     }
 
     fun clearMessages() {
         resetRealtime()
-        _messages.value = emptyList()
-        currentChannelId = null
+        activeConversation = null
     }
 
     fun disconnectRealtime() {
@@ -324,9 +368,9 @@ class ChatViewModel : ViewModel() {
         inboxJob?.cancel()
         inboxCollectJob?.cancel()
         typingStopJob?.cancel()
-        profileWsClient.disconnect()
-        personalWsClient.disconnect()
-        inboxWsClient.disconnect()
+        profileEventsSource.disconnect()
+        personalMessagesSource.disconnect()
+        inboxEventsSource.disconnect()
     }
 
     fun watchDmInbox(dmIds: List<String>) {
@@ -336,12 +380,12 @@ class ChatViewModel : ViewModel() {
 
         inboxJob?.cancel()
         inboxCollectJob?.cancel()
-        inboxWsClient.disconnect()
+        inboxEventsSource.disconnect()
 
         if (cleanIds.isEmpty()) return
 
         inboxCollectJob = viewModelScope.launch {
-            inboxWsClient.personalMessages.collect { message ->
+            inboxEventsSource.messages.collect { message ->
                 applyPersonalMessage(message)
             }
         }
@@ -349,8 +393,8 @@ class ChatViewModel : ViewModel() {
         inboxJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    inboxWsClient.connectDmInbox(token, cleanIds)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    inboxEventsSource.connect(token, cleanIds)
                 } catch (e: Exception) {
                     delay(2500)
                 }
@@ -388,7 +432,7 @@ class ChatViewModel : ViewModel() {
 
     private fun collectRealtimeMessages() {
         messagesCollectJob = viewModelScope.launch {
-            wsClient.incomingMessages.collect { message ->
+            conversationEventsSource.messages.collect { message ->
                 appendMessage(message)
             }
         }
@@ -396,7 +440,7 @@ class ChatViewModel : ViewModel() {
 
     private fun collectTypingEvents() {
         typingCollectJob = viewModelScope.launch {
-            wsClient.typingEvents.collect { event ->
+            conversationEventsSource.typingEvents.collect { event ->
                 applyTypingEvent(event)
             }
         }
@@ -407,15 +451,8 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun applyMessageChange(message: Message) {
-        if (message.deleted) {
-            _messages.value = _messages.value.filterNot { it.id == message.id }
-            return
-        }
-        val index = _messages.value.indexOfFirst { it.id == message.id }
-        _messages.value = if (index < 0) {
-            _messages.value + message
-        } else {
-            _messages.value.toMutableList().apply { this[index] = message }
+        _conversationState.update {
+            it.copy(messages = it.messages.withMessageChange(message))
         }
     }
 
@@ -423,7 +460,7 @@ class ChatViewModel : ViewModel() {
         if (personalMessagesJob != null) return
 
         personalMessagesCollectJob = viewModelScope.launch {
-            personalWsClient.personalMessages.collect { message ->
+            personalMessagesSource.messages.collect { message ->
                 applyPersonalMessage(message)
             }
         }
@@ -431,8 +468,8 @@ class ChatViewModel : ViewModel() {
         personalMessagesJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    personalWsClient.connectPersonalMessages(token)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    personalMessagesSource.connect(token)
                 } catch (e: Exception) {
                     delay(2500)
                 }
@@ -443,20 +480,19 @@ class ChatViewModel : ViewModel() {
     private fun applyPersonalMessage(message: Message) {
         val dmId = message.dmId ?: return
         if (message.deleted || message.edited) {
-            if (currentChannelId == "dm:$dmId") applyMessageChange(message)
+            if (activeConversation == ConversationTarget.DirectMessage(dmId)) applyMessageChange(message)
             return
         }
         val isOwnMessage =
-            (message.senderId != null && message.senderId == SessionManager.getUserId()) ||
-                message.senderUsername == SessionManager.getUsername()
+            (message.senderId != null && message.senderId == sessionIdentityProvider.currentUserId()) ||
+                message.senderUsername == sessionIdentityProvider.currentUsername()
         val isOpenDm = visibleDmId == dmId && AppVisibility.isInForeground.value
 
         if (isOpenDm) {
             appendMessage(message)
             if (!isOwnMessage) {
                 viewModelScope.launch {
-                    val token = SessionManager.getToken() ?: return@launch
-                    runCatching { friendApi.markDmRead(dmId, token) }
+                    runCatching { chatRepository.markDmRead(dmId) }
                 }
             }
             return
@@ -468,31 +504,43 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun applyTypingEvent(event: TypingEvent) {
-        val selfId = SessionManager.getUserId()
+        val selfId = sessionIdentityProvider.currentUserId()
         if (event.senderId == selfId) return
 
         val key = event.dmId ?: event.channelId ?: return
-        _typingUsers.value = _typingUsers.value.toMutableMap().apply {
-            if (event.typing) put(key, event.senderUsername) else remove(key)
+        typingExpiryJobs.remove(key)?.cancel()
+        _conversationState.update { state ->
+            state.copy(
+                typingUsers = state.typingUsers.toMutableMap().apply {
+                    if (event.typing) put(key, event.senderUsername) else remove(key)
+                }
+            )
         }
 
         if (event.typing) {
-            viewModelScope.launch {
+            typingExpiryJobs[key] = viewModelScope.launch {
                 delay(2500)
-                _typingUsers.value = _typingUsers.value - key
+                _conversationState.update { it.copy(typingUsers = it.typingUsers - key) }
+                typingExpiryJobs.remove(key)
             }
         }
     }
 
     private suspend fun safeSendTyping(dmId: String? = null, channelId: String? = null, typing: Boolean) {
-        runCatching { wsClient.sendTyping(channelId = channelId, dmId = dmId, typing = typing) }
+        runCatching {
+            conversationEventsSource.sendTyping(
+                channelId = channelId,
+                dmId = dmId,
+                typing = typing
+            )
+        }
     }
 
     private fun connectProfileEvents() {
         if (profileEventsJob != null) return
 
         profileEventsCollectJob = viewModelScope.launch {
-            profileWsClient.profileEvents.collect { event ->
+            profileEventsSource.events.collect { event ->
                 applyProfileEvent(event)
             }
         }
@@ -500,8 +548,8 @@ class ChatViewModel : ViewModel() {
         profileEventsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    profileWsClient.connectProfileEvents(token)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    profileEventsSource.connect(token)
                 } catch (_: Exception) {}
                 if (isActive) delay(1500)
             }
@@ -509,24 +557,44 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun applyProfileEvent(event: ProfileEvent) {
-        _messages.value = _messages.value.map { message ->
-            if (message.senderId == event.userId) {
-                message.copy(senderUsername = event.username, senderAvatar = event.avatarUrl)
-            } else {
-                message
-            }
+        _conversationState.update { state ->
+            state.copy(
+                messages = state.messages.map { message ->
+                    if (message.senderId == event.userId) {
+                        message.copy(senderUsername = event.username, senderAvatar = event.avatarUrl)
+                    } else {
+                        message
+                    }
+                }
+            )
         }
     }
 
     private fun resetRealtime() {
+        conversationLoadJob?.cancel()
+        conversationLoadJob = null
+        olderMessagesJob?.cancel()
+        olderMessagesJob = null
+        messageSearchJob?.cancel()
+        messageSearchJob = null
+        _searchState.value = MessageSearchUiState()
         wsJob?.cancel()
         messagesCollectJob?.cancel()
         typingCollectJob?.cancel()
-        wsClient.disconnect()
-        _messages.value = emptyList()
-        _typingUsers.value = emptyMap()
-        _hasOlderMessages.value = false
-        _isLoadingOlder.value = false
+        typingExpiryJobs.values.forEach(Job::cancel)
+        typingExpiryJobs.clear()
+        conversationEventsSource.disconnect()
+        _conversationState.update {
+            it.copy(
+                messages = emptyList(),
+                isLoading = false,
+                isLoadingOlder = false,
+                hasOlderMessages = false,
+                error = null,
+                isUploadingAttachment = false,
+                typingUsers = emptyMap()
+            )
+        }
     }
 
     override fun onCleared() {

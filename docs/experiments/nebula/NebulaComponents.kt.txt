@@ -1,0 +1,952 @@
+package com.matteo.chatapp.ui.components
+
+import androidx.compose.animation.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.drawRect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.matteo.chatapp.model.DmConversation
+import com.matteo.chatapp.model.Message
+import com.matteo.chatapp.model.Server
+import com.matteo.chatapp.platform.AvatarFilePicker
+import com.matteo.chatapp.platform.AttachmentFilePicker
+import com.matteo.chatapp.ui.theme.*
+
+// ============================================================================
+// GLASSMORPHISM SURFACE - Componente base con blur y profundidad
+// ============================================================================
+
+@Composable
+fun GlassSurface(
+    modifier: Modifier = Modifier,
+    depth: DepthLayer = DepthLayer.SURFACE,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(12.dp),
+    contentColor: Color = OnSurface,
+    border: BorderStroke? = null,
+    content: @Composable () -> Unit
+) {
+    val palette = Nebula
+    Box(
+        modifier = modifier
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        palette.surfaceGlass.copy(alpha = 0.8f),
+                        palette.surfaceGlassStrong.copy(alpha = 0.5f)
+                    ),
+                    start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                    end = androidx.compose.ui.geometry.Offset(0f, 1f)
+                ),
+                shape = shape
+            )
+            .border(
+                width = if (border != null) 1.dp else 0.dp,
+                color = Outline.copy(alpha = palette.depthSurface.borderOpacity),
+                shape = shape
+            )
+            .shadow(
+                elevation = depth.elevation.dp,
+                shape = shape,
+                shadowColor = palette.shadowColor.copy(alpha = palette.shadowOpacity)
+            )
+            .clip(shape)
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            content()
+        }
+    }
+}
+
+// ============================================================================
+// NEBULA APP BAR - Top bar minimalista con gradiente sutil
+// ============================================================================
+
+@Composable
+fun NebulaTopBar(
+    title: String,
+    subtitle: String? = null,
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
+    onProfile: (() -> Unit)? = null,
+    onAppearance: (() -> Unit)? = nil,
+    onLogout: (() -> Unit)? = nil,
+    trailingActions: (@Composable () -> Unit)? = nil
+) {
+    val palette = Nebula
+    val searchAvailable = onSearch != null
+
+    GlassSurface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        depth = DepthLayer.SURFACE,
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Leading - Back o Logo
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver", tint = OnSurface)
+                }
+            } else {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.displaySmall,
+                    color = OnBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Center - Subtitle o Search
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Muted
+                )
+            } else if (searchAvailable) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp)
+                        .height(40.dp)
+                        .background(SurfaceVariant, RoundedCornerShape(20.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .clickable { onSearch() },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Search, contentDescription = "Buscar", tint = Muted, size = 20.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Buscar...", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                    }
+                }
+            }
+
+            // Trailing actions
+            if (trailingActions != null) {
+                trailingActions()
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    onAppearance?.let { IconButton(onClick = it) { Icon(Icons.Rounded.PaletteOutline, "Tema", tint = OnSurface) } }
+                    onProfile?.let { IconButton(onClick = it) { Icon(Icons.Rounded.PersonOutline, "Perfil", tint = OnSurface) } }
+                    onLogout?.let { IconButton(onClick = it) { Icon(Icons.Rounded.Logout, "Salir", tint = Error) } }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// SERVER AVATAR - Con aura gradiente animada
+// ============================================================================
+
+@Composable
+fun ServerAvatar(
+    server: Server,
+    modifier: Modifier = Modifier,
+    size: Float = 48f,
+    selected: Boolean = false,
+    onClick: (() -> Unit)? = null
+) {
+    val palette = Nebula
+    val gradient = rememberServerGradient(server.id)
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (selected) 1f else 0.3f,
+        animationSpec = tween(200)
+    )
+
+    val gradientPainter = remember(server.id, size) {
+        BrushPainter(gradient)
+    }
+
+    Box(
+        modifier = modifier
+            .size(size.dp)
+            .clickable(onClick = onClick)
+            .background(
+                brush = gradient,
+                shape = RoundedCornerShape(16.dp)
+            )
+    ) {
+        // Aura glow cuando seleccionado
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .size((size + 8).dp)
+                    .graphicsLayer { alpha = glowAlpha }
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                gradient.colors[0].copy(alpha = 0.4f),
+                                gradient.colors[1].copy(alpha = 0.2f),
+                                Color.Transparent
+                            ),
+                            center = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                            radius = 1f
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .padding(-4.dp)
+            )
+        }
+
+        // Icono o inicial
+        server.iconUrl?.let { url ->
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.foundation.rememberAsyncImagePainter(url),
+                contentDescription = server.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size.dp)
+                    .clip(RoundedCornerShape(16.dp))
+            )
+        } ?: Text(
+            text = server.name.first().uppercase(),
+            fontSize = (size * 0.45).sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                .wrapContentSize(Alignment.Center)
+        )
+    }
+}
+
+// ============================================================================
+// USER AVATAR - Con aura personal
+// ============================================================================
+
+@Composable
+fun UserAvatar(
+    userId: String,
+    name: String,
+    avatarUrl: String?,
+    modifier: Modifier = Modifier,
+    size: Float = 40f,
+    showStatus: Boolean = false,
+    isOnline: Boolean = false
+) {
+    val palette = Nebula
+    val aura = rememberAvatarAura(userId)
+
+    Box(modifier = modifier.size(size.dp)) {
+        // Aura background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = aura, shape = RoundedCornerShape(50.dp))
+                .padding(-4.dp)
+        )
+
+        // Avatar
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(50.dp))
+        ) {
+            avatarUrl?.let { url ->
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.foundation.rememberAsyncImagePainter(url),
+                    contentDescription = name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } ?: Text(
+                text = name.first().uppercase(),
+                fontSize = (size * 0.4).sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(palette.primary, RoundedCornerShape(50.dp))
+                    .wrapContentSize(Alignment.Center)
+            )
+        }
+
+        // Status indicator
+        if (showStatus) {
+            Box(
+                modifier = Modifier
+                    .size((size * 0.3).dp)
+                    .align(Alignment.BottomEnd)
+                    .background(
+                        color = if (isOnline) Success else palette.onSurfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(50.dp)
+                    )
+                    .border(2.dp, palette.background, RoundedCornerShape(50.dp))
+            )
+        }
+    }
+}
+
+// ============================================================================
+// CHANNEL CARD - Tarjeta de canal moderna
+// ============================================================================
+
+@Composable
+fun ChannelCard(
+    name: String,
+    icon: ImageVector = Icons.Rounded.ChatBubbleOutline,
+    accent: CosmicAccent = CosmicAccent.NEBULA_VIOLET,
+    unreadCount: Int = 0,
+    isSelected: Boolean = false,
+    isMuted: Boolean = false,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    onClick: () -> Unit
+) {
+    val palette = Nebula
+    val selectedAlpha by animateFloatAsState(
+        targetValue = if (isSelected) 1f else 0f,
+        animationSpec = tween(150)
+    )
+    val unreadAlpha by animateFloatAsState(
+        targetValue = if (unreadCount > 0) 1f else 0f,
+        animationSpec = spring(0.5f, 0.8f)
+    )
+
+    GlassSurface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clickable { onClick() },
+        depth = if (isSelected) DepthLayer.ELEVATED else DepthLayer.SURFACE,
+        shape = RoundedCornerShape(12.dp),
+        contentColor = if (isSelected) OnPrimary else OnSurface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(
+                            brush = if (isSelected)
+                                Brush.horizontalGradient(
+                                    colors = listOf(accent.primary.copy(alpha = 0.8f), accent.glow.copy(alpha = 0.4f))
+                                )
+                                else palette.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .wrapContentSize(Alignment.Center)
+                        .graphicsLayer { alpha = if (isMuted) 0.5f else 1f }
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isSelected) OnPrimary else (if (isMuted) Muted else OnSurfaceVariant),
+                        size = 18.dp
+                    )
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(crossAxisSize = LayoutSize.Wrap) {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (isSelected) OnPrimary else OnSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (isMuted) {
+                        Text("Silenciado", style = MaterialTheme.typography.labelSmall, color = Muted)
+                    }
+                }
+            }
+
+            // Unread badge
+            if (unreadCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer { alpha = unreadAlpha }
+                        .padding(start = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlassSurface(
+                        modifier = Modifier
+                            .widthIn(min = 20.dp)
+                            .height(20.dp)
+                            .padding(horizontal = 8.dp),
+                        depth = DepthLayer.ELEVATED,
+                        shape = RoundedCornerShape(10.dp),
+                        contentColor = OnPrimary
+                    ) {
+                        Text(
+                            text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// DM ROW - Fila de conversación directa
+// ============================================================================
+
+@Composable
+fun DmRow(
+    dm: DmConversation,
+    selected: Boolean = false,
+    hasUnread: Boolean = false,
+    unreadCount: Int = 0,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = nil
+) {
+    val palette = Nebula
+
+    GlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clickable { onClick() }
+            .combinedClickable(
+                onLongClick = onLongClick,
+                onClick = onClick
+            ),
+        depth = if (selected) DepthLayer.ELEVATED else DepthLayer.SURFACE,
+        shape = RoundedCornerShape(14.dp),
+        contentColor = OnSurface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                UserAvatar(
+                    userId = dm.otherUserId,
+                    name = dm.otherUsername,
+                    avatarUrl = dm.otherAvatar,
+                    size = 44f,
+                    showStatus = true,
+                    isOnline = dm.otherIsOnline
+                )
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(crossAxisSize = LayoutSize.Wrap) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = dm.otherUsername,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (hasUnread) palette.primary else OnSurface,
+                            fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (dm.otherIsOnline) {
+                            Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier.size(6.dp)
+                                    .background(Success, RoundedCornerShape(3.dp))
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = dm.lastMessageContent ?: "Sin mensajes",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (dm.lastMessageTime != null) {
+                    Text(
+                        text = dm.lastMessageTime!,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Muted
+                    )
+                }
+
+                if (hasUnread && unreadCount > 0) {
+                    GlassSurface(
+                        modifier = Modifier.widthIn(min = 20.dp).height(20.dp).padding(horizontal = 8.dp),
+                        depth = DepthLayer.ELEVATED,
+                        shape = RoundedCornerShape(10.dp),
+                        contentColor = OnPrimary
+                    ) {
+                        Text(
+                            text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// SERVER DRAWER - Drawer flotante para servidores
+// ============================================================================
+
+@Composable
+fun ServerDrawer(
+    servers: List<Server>,
+    selectedServerId: String?,
+    onServerClick: (Server) -> Unit,
+    onCreateServer: () -> Unit,
+    onInvitations: () -> Unit,
+    pendingInvitations: Int,
+    onDismiss: () -> Unit
+) {
+    val palette = Nebula
+
+    GlassSurface(
+        modifier = Modifier
+            .width(280.dp)
+            .fillMaxHeight()
+            .padding(16.dp),
+        depth = DepthLayer.OVERLAY,
+        shape = RoundedCornerShape(24.dp),
+        contentColor = OnSurface
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Top
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Tus Espacios", style = MaterialTheme.typography.headlineMedium, color = OnBackground)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Cerrar", tint = OnSurfaceVariant)
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // Create server button
+            GlassSurface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCreateServer() }
+                    .padding(vertical = 4.dp),
+                depth = DepthLayer.SURFACE,
+                shape = RoundedCornerShape(14.dp),
+                contentColor = OnPrimary
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(PrimaryGradient, RoundedCornerShape(10.dp))
+                            .wrapContentSize(Alignment.Center)
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, tint = OnPrimary, size = 24.dp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text("Crear espacio", style = MaterialTheme.typography.titleMedium, color = OnPrimary)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Invitations
+            if (pendingInvitations > 0) {
+                GlassSurface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onInvitations() }
+                        .padding(vertical = 4.dp),
+                    depth = DepthLayer.ELEVATED,
+                    shape = RoundedCornerShape(14.dp),
+                    contentColor = OnBackground
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BadgedBox(
+                            badge = { Badge { Text(pendingInvitations.toString()) } },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(SurfaceVariant, RoundedCornerShape(10.dp))
+                                .wrapContentSize(Alignment.Center)
+                        ) {
+                            Icon(Icons.Rounded.MailOutline, contentDescription = "Invitaciones", tint = Primary, size = 20.dp)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text("Invitaciones pendientes", style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
+
+            // Servers list
+            Text("SERVIDORES", style = MaterialTheme.typography.labelSmall, color = Muted)
+            Spacer(Modifier.height(8.dp))
+
+            if (servers.isEmpty()) {
+                GlassSurface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    depth = DepthLayer.SURFACE,
+                    shape = RoundedCornerShape(16.dp),
+                    contentColor = OnSurfaceVariant
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.PeopleOutline, contentDescription = null, tint = Muted, size = 48.dp)
+                        Text("Sin servidores aún", style = MaterialTheme.typography.titleMedium, color = OnSurfaceVariant)
+                        Text("Crea tu primer espacio o únete a uno", style = MaterialTheme.typography.bodySmall, color = Muted, textAlign = TextAlign.Center)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(servers, key = { it.id }) { server ->
+                        GlassSurface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onServerClick(server) },
+                            depth = if (server.id == selectedServerId) DepthLayer.ELEVATED else DepthLayer.SURFACE,
+                            shape = RoundedCornerShape(14.dp),
+                            contentColor = if (server.id == selectedServerId) OnPrimary else OnSurface
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ServerAvatar(
+                                    server = server,
+                                    size = 40f,
+                                    selected = server.id == selectedServerId
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = server.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (server.id == selectedServerId) OnPrimary else OnSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MESSAGE BUBBLE - Burbuja de mensaje con depth
+// ============================================================================
+
+@Composable
+fun MessageBubble(
+    message: Message,
+    isOwn: Boolean,
+    showAvatar: Boolean = true,
+    showName: Boolean = true,
+    isConsecutive: Boolean = false,
+    onReply: (Message) -> Unit,
+    onEdit: (Message) -> Unit,
+    onDelete: (Message) -> Unit,
+    onProfileClick: () -> Unit
+) {
+    val palette = Nebula
+    val isEdited = message.edited
+    val hasAttachment = message.attachmentName != null
+    val hasReply = message.replyToId != null
+
+    val depth = if (isOwn) DepthLayer.ELEVATED else DepthLayer.SURFACE
+    val bubbleColor = if (isOwn) palette.primary else palette.surfaceElevated
+    val textColor = if (isOwn) OnPrimary else OnSurface
+    val nameColor = if (isOwn) OnPrimary.copy(alpha = 0.7f) else Muted
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        horizontalAlignment = if (isOwn) Alignment.End else Alignment.Start
+    ) {
+        // Nombre (solo si no consecutivo)
+        if (showName && !isConsecutive && !isOwn) {
+            Text(
+                text = message.senderUsername,
+                style = MaterialTheme.typography.labelSmall,
+                color = nameColor,
+                modifier = Modifier.padding(start = if (showAvatar) 52.dp else 12.dp, bottom = 2.dp)
+            )
+        } else if (showName && !isConsecutive && !isOwn) {
+            Spacer(Modifier.padding(start = if (showAvatar) 52.dp else 12.dp, bottom = 2.dp).height(16.dp))
+        }
+
+        Row(
+            modifier = Modifier
+                .wrapContentWidth()
+                .padding(vertical = 2.dp),
+            horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start,
+            crossAxisAlignment = if (showAvatar && !isConsecutive) androidx.compose.ui.layout.CrossAxisAlignment.Start else androidx.compose.ui.layout.CrossAxisAlignment.Center
+        ) {
+            // Avatar
+            if (showAvatar && !isConsecutive && !isOwn) {
+                UserAvatar(
+                    userId = message.senderId,
+                    name = message.senderUsername,
+                    avatarUrl = message.senderAvatar,
+                    size = 36f
+                )
+                Spacer(Modifier.width(8.dp))
+            } else if (showAvatar && !isConsecutive && !isOwn) {
+                Spacer(Modifier.width(44.dp))
+            }
+
+            // Burbuja
+            Column(
+                crossAxisSize = LayoutSize.Wrap,
+                horizontalAlignment = if (isOwn) Alignment.End else Alignment.Start
+            ) {
+                // Reply preview
+                if (hasReply) {
+                    GlassSurface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp),
+                        depth = DepthLayer.BASE,
+                        shape = RoundedCornerShape(8.dp),
+                        contentColor = textColor.copy(alpha = 0.7f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.foundation.layout.Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .fillMaxHeight()
+                                    .background(if (isOwn) OnPrimary.copy(alpha = 0.7f) else Accent, RoundedCornerShape(1.5.dp))
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(crossAxisSize = LayoutSize.Wrap) {
+                                Text(message.replyToSenderUsername ?: "Respuesta", style = MaterialTheme.typography.labelSmall, color = textColor.copy(alpha = 0.7f))
+                                Text(
+                                    text = message.replyToContent ?: "Adjunto",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = textColor.copy(alpha = 0.9f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Contenido principal
+                GlassSurface(
+                    modifier = Modifier
+                        .widthIn(min = 48.dp, max = 520.dp)
+                        .padding(vertical = 4.dp),
+                    depth = depth,
+                    shape = RoundedCornerShape(
+                        topStart = 18.dp,
+                        topEnd = 18.dp,
+                        bottomStart = if (isOwn) 18.dp else 4.dp,
+                        bottomEnd = if (isOwn) 4.dp : 18.dp
+                    ),
+                    contentColor = textColor
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        crossAxisSize = LayoutSize.Wrap
+                    ) {
+                        // Texto
+                        if (message.content.isNotBlank()) {
+                            Text(
+                                text = message.content,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = textColor
+                            )
+                        }
+
+                        // Adjunto
+                        if (hasAttachment) {
+                            Spacer(Modifier.height(8.dp))
+                            AttachmentPreview(
+                                name = message.attachmentName!!,
+                                contentType = message.attachmentContentType,
+                                size = message.attachmentSize,
+                                url = message.attachmentUrl,
+                                isOwn = isOwn
+                            )
+                        }
+
+                        // Footer (hora + edited)
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isEdited) {
+                                Text(
+                                    "editado",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = textColor.copy(alpha = 0.5f)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = message.createdAt?.substring(11, 16) ?: "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textColor.copy(alpha = 0.4f)
+                            )
+                        }
+                    }
+                }
+
+                // Menú contextual (solo propios)
+                if (isOwn) {
+                    IconButton(
+                        onClick = { /* TODO: mostrar menu */ },
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones", tint = textColor.copy(alpha = 0.5f), size = 18.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AttachmentPreview(
+    name: String,
+    contentType: String?,
+    size: Long?,
+    url: String?,
+    isOwn: Boolean
+) {
+    val palette = Nebula
+    val isImage = contentType?.startsWith("image/") == true
+    val isAudio = contentType?.startsWith("audio/") == true
+    val isVideo = contentType?.startsWith("video/") == true
+
+    val icon = when {
+        isImage -> Icons.Rounded.ImageOutline
+        isAudio -> Icons.Rounded.Audiotrack
+        isVideo -> Icons.Rounded.VideoFileOutline
+        else -> Icons.Rounded.InsertDriveFileOutline
+    }
+
+    GlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        depth = DepthLayer.BASE,
+        shape = RoundedCornerShape(12.dp),
+        contentColor = if (isOwn) OnPrimary else OnSurface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(palette.surfaceVariant, RoundedCornerShape(10.dp))
+                    .wrapContentSize(Alignment.Center)
+            ) {
+                Icon(icon, contentDescription = null, tint = palette.primary, size = 22.dp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(crossAxisSize = LayoutSize.Wrap, modifier = Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.bodyMedium, color = textColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isAudio) {
+                        Icon(Icons.Rounded.PlayCircleOutline, contentDescription = null, tint = palette.primary, size = 16.dp)
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = "${formatFileSize(size ?: 0)} • ${contentType ?: "Archivo"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Muted
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${(bytes / 1024).toString()} KB"
+        else -> "${(bytes / (1024 * 1024)).toString()} MB"
+    }
+}

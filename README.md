@@ -1,30 +1,90 @@
-This is a Kotlin Multiplatform project targeting Android, Desktop (JVM).
+# Chimera Chat
 
-* [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Estado de la retoma y cambios conservados:
+[auditoría del 9 de octubre de 2026](docs/restart-audit-2026-10-09.md).
 
-### Running the apps
+Cliente de chat multiplataforma construido con Kotlin Multiplatform y Compose
+Multiplatform. Comparte la lógica y la interfaz entre Android y Desktop (JVM).
 
-Use the run configurations provided by the run widget in your IDE's toolbar. You can also use these commands and options:
+## Arquitectura
 
-- Android app: `./gradlew :androidApp:assembleDebug`
-- Desktop app:
-  - Hot reload: `./gradlew :desktopApp:hotRun --auto`
-  - Standard run: `./gradlew :desktopApp:run`
+El código compartido vive en `shared/src/commonMain/kotlin/com/matteo/chatapp`:
 
-### Running tests
+- `di`: punto de composición de dependencias. `AppContainer` crea y comparte el
+  cliente HTTP, las APIs, los WebSockets y los ViewModels.
+- `model`: contratos serializables intercambiados con el backend.
+- `network`: acceso HTTP, WebSocket, renovación de sesión y traducción de errores.
+- `platform`: abstracciones `expect/actual` para archivos, portapapeles, navegación
+  y grabación de voz.
+- `repository`: contratos de acceso a datos e implementaciones de autenticación,
+  chat, servidores, amigos y perfiles, además del acceso a sesión y preferencias.
+- `viewmodel`: estado y lógica de presentación por dominio.
+- `ui/components`: componentes visuales reutilizables y sin navegación.
+- `ui/screens`: pantallas y coordinación de eventos de usuario.
+- `ui/theme`: colores, tipografía y preferencias de apariencia.
 
-Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
+La aplicación utiliza flujo unidireccional:
 
-- Android tests: `./gradlew :shared:testAndroidHostTest`
-- Desktop tests: `./gradlew :shared:jvmTest`
+```text
+UI -> acción del ViewModel -> Repository -> API/WebSocket -> UiState -> UI
+```
 
----
+Cada dominio expone un único `StateFlow` coherente (`ChatConversationUiState`,
+`FriendUiState` y `ServerUiState`). Los eventos que sólo deben consumirse una vez
+se modelan con `SharedFlow`, no como estado persistente.
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+`AppContainer` es el único lugar donde se construyen las dependencias. Los
+Los ViewModels reciben repositorios y fuentes de eventos mediante su constructor;
+ninguno conoce clientes HTTP, WebSocket ni el almacenamiento de sesión.
+Autenticación, chat, servidores, amigos y perfiles están detrás de contratos
+sustituibles por implementaciones falsas en pruebas. Esto evita recursos
+duplicados y separa completamente la presentación de la infraestructura.
+
+## Añadir una funcionalidad
+
+1. Define o amplía el contrato correspondiente en `model`.
+2. Implementa la operación remota en `network`.
+3. Expón el caso de uso desde el repositorio del dominio cuando exista.
+4. Actualiza el `UiState` y las acciones del ViewModel.
+5. Representa el estado en un componente o pantalla de `ui`.
+6. Añade pruebas de reductores y ViewModels con dependencias falsas en `commonTest`.
+
+Evita comunicar pantallas directamente con APIs, introducir estado duplicado en
+varios `StateFlow` o construir dependencias fuera de `AppContainer`.
+
+## Configuración del backend
+
+La URL del backend está definida en
+`shared/src/commonMain/kotlin/com/matteo/chatapp/network/HttpClient.kt`.
+
+## Compilar y ejecutar
+
+En Windows:
+
+```powershell
+.\gradlew.bat :androidApp:assembleDebug
+.\gradlew.bat :desktopApp:run
+```
+
+En macOS o Linux:
+
+```bash
+./gradlew :androidApp:assembleDebug
+./gradlew :desktopApp:run
+```
+
+El APK debug se genera en:
+
+```text
+androidApp/build/outputs/apk/debug/androidApp-debug.apk
+```
+
+## Pruebas
+
+```powershell
+.\gradlew.bat :shared:jvmTest
+```
+
+Las pruebas compartidas cubren actualmente traducción de errores, ViewModels de
+autenticación, chat y amigos con repositorios falsos, y reductores de estado de
+chat, servidores, amigos, presencia y perfiles.

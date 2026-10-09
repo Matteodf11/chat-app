@@ -3,60 +3,35 @@ package com.matteo.chatapp.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.matteo.chatapp.model.Channel
-import com.matteo.chatapp.model.CreateChannelRequest
-import com.matteo.chatapp.model.CreateServerRequest
 import com.matteo.chatapp.model.Server
-import com.matteo.chatapp.model.ServerInvitation
-import com.matteo.chatapp.model.ServerMember
-import com.matteo.chatapp.model.UpdateServerRequest
-import com.matteo.chatapp.network.ServerApi
-import com.matteo.chatapp.network.createHttpClient
-import com.matteo.chatapp.network.WebSocketClient
 import com.matteo.chatapp.platform.PickedAvatarFile
-import com.matteo.chatapp.repository.SessionManager
+import com.matteo.chatapp.repository.AccessTokenProvider
+import com.matteo.chatapp.repository.ServerEventsSource
+import com.matteo.chatapp.repository.ServerRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class ServerViewModel : ViewModel() {
-
-    private val client = createHttpClient()
-    private val api = ServerApi(client)
-    private val serverWsClient = WebSocketClient(client)
+class ServerViewModel(
+    private val serverRepository: ServerRepository,
+    private val accessTokenProvider: AccessTokenProvider,
+    private val serverEventsSource: ServerEventsSource
+) : ViewModel() {
     private var serverEventsJob: Job? = null
     private var serverEventsCollectJob: Job? = null
+    private var channelsLoadJob: Job? = null
+    private var membersLoadJob: Job? = null
 
-    private val _servers = MutableStateFlow<List<Server>>(emptyList())
-    val servers: StateFlow<List<Server>> = _servers
-
-    private val _channels = MutableStateFlow<List<Channel>>(emptyList())
-    val channels: StateFlow<List<Channel>> = _channels
-
-    private val _searchChannels = MutableStateFlow<List<Channel>>(emptyList())
-    val searchChannels: StateFlow<List<Channel>> = _searchChannels
-
-    private val _members = MutableStateFlow<List<ServerMember>>(emptyList())
-    val members: StateFlow<List<ServerMember>> = _members
-
-    private val _pendingInvitations = MutableStateFlow<List<ServerInvitation>>(emptyList())
-    val pendingInvitations: StateFlow<List<ServerInvitation>> = _pendingInvitations
-
-    private val _selectedServer = MutableStateFlow<Server?>(null)
-    val selectedServer: StateFlow<Server?> = _selectedServer
-
-    private val _selectedChannel = MutableStateFlow<Channel?>(null)
-    val selectedChannel: StateFlow<Channel?> = _selectedChannel
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
-
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error
+    private val _uiState = MutableStateFlow(ServerUiState())
+    val uiState: StateFlow<ServerUiState> = _uiState.asStateFlow()
 
     private val _accessRevoked = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val accessRevoked: SharedFlow<String> = _accessRevoked
@@ -69,52 +44,74 @@ class ServerViewModel : ViewModel() {
 
     fun loadServers() {
         viewModelScope.launch {
-            _isLoading.value = true
+            _uiState.update { it.copy(isLoading = true) }
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                _servers.value = api.getMyServers(token)
+                val servers = serverRepository.getServers()
+                _uiState.update { it.copy(servers = servers) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // error silencioso por ahora
             } finally {
-                _isLoading.value = false
+                _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
 
     fun selectServer(server: Server) {
-        _selectedServer.value = server
-        _selectedChannel.value = null
+        channelsLoadJob?.cancel()
+        membersLoadJob?.cancel()
+        _uiState.update {
+            it.copy(
+                selectedServer = server,
+                selectedChannel = null,
+                channels = emptyList(),
+                members = emptyList()
+            )
+        }
         loadChannels(server.id)
         loadMembers(server.id)
     }
 
     fun selectChannel(channel: Channel) {
-        _selectedChannel.value = channel
+        _uiState.update { it.copy(selectedChannel = channel) }
     }
 
     fun clearSelectedChannel() {
-        _selectedChannel.value = null
+        _uiState.update { it.copy(selectedChannel = null) }
     }
 
     private fun loadChannels(serverId: String) {
-        viewModelScope.launch {
+        channelsLoadJob?.cancel()
+        channelsLoadJob = viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                _channels.value = api.getChannels(serverId, token)
+                val channels = serverRepository.getChannels(serverId)
+                if (_uiState.value.selectedServer?.id == serverId) {
+                    _uiState.update { it.copy(channels = channels) }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // error silencioso
             }
         }
     }
 
-    fun loadMembers(serverId: String? = _selectedServer.value?.id) {
+    fun loadMembers(serverId: String? = _uiState.value.selectedServer?.id) {
         val targetServerId = serverId ?: return
-        viewModelScope.launch {
+        membersLoadJob?.cancel()
+        membersLoadJob = viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                _members.value = api.getMembers(targetServerId, token)
+                val members = serverRepository.getMembers(targetServerId)
+                if (_uiState.value.selectedServer?.id == targetServerId) {
+                    _uiState.update { it.copy(members = members) }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudieron cargar los miembros"
+                if (_uiState.value.selectedServer?.id == targetServerId) {
+                    _uiState.update { it.copy(error = "No se pudieron cargar los miembros") }
+                }
             }
         }
     }
@@ -122,116 +119,132 @@ class ServerViewModel : ViewModel() {
     fun loadPendingInvitations() {
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                _pendingInvitations.value = api.getPendingInvitations(token)
+                val invitations = serverRepository.getPendingInvitations()
+                _uiState.update { it.copy(pendingInvitations = invitations) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudieron cargar las invitaciones"
+                _uiState.update { it.copy(error = "No se pudieron cargar las invitaciones") }
             }
         }
     }
 
     fun loadAllChannelsForSearch() {
         viewModelScope.launch {
-            val token = SessionManager.getToken() ?: return@launch
-            val collected = mutableListOf<Channel>()
-            _servers.value.forEach { server ->
-                runCatching { api.getChannels(server.id, token) }
-                    .getOrNull()
-                    ?.let(collected::addAll)
+            try {
+                val channels = serverRepository.getAllChannels(
+                    _uiState.value.servers.map(Server::id)
+                )
+                _uiState.update { it.copy(searchChannels = channels) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // La búsqueda conserva los resultados anteriores si la sesión no está disponible.
             }
-            _searchChannels.value = collected.distinctBy { it.id }
         }
     }
 
     fun createServer(name: String, description: String, iconFile: PickedAvatarFile?, onCreated: () -> Unit = {}) {
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                var server = api.createServer(
-                    CreateServerRequest(
-                        name = name.trim(),
-                        description = description.trim().takeIf { it.isNotBlank() },
-                        iconUrl = null
-                    ),
-                    token
-                )
-                if (iconFile != null) {
-                    server = api.uploadServerIcon(server.id, iconFile.contentType, iconFile.bytes, token)
-                }
-                _servers.value = _servers.value + server
+                val server = serverRepository.createServer(name, description, iconFile)
+                _uiState.update { it.copy(servers = it.servers + server, error = null) }
                 selectServer(server)
-                _error.value = null
                 onCreated()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo crear el servidor"
+                _uiState.update { it.copy(error = "No se pudo crear el servidor") }
             }
         }
     }
 
     fun updateSelectedServer(name: String, description: String, iconFile: PickedAvatarFile?) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                var updated = api.updateServer(
+                val updated = serverRepository.updateServer(
                     server.id,
-                    UpdateServerRequest(
-                        name = name.trim().takeIf { it.isNotBlank() },
-                        description = description.trim(),
-                        iconUrl = null
-                    ),
-                    token
+                    name,
+                    description,
+                    iconFile
                 )
-                if (iconFile != null) {
-                    updated = api.uploadServerIcon(server.id, iconFile.contentType, iconFile.bytes, token)
+                _uiState.update {
+                    if (it.selectedServer?.id != server.id) {
+                        it
+                    } else {
+                        it.copy(
+                            selectedServer = updated,
+                            servers = it.servers.upsertServer(updated),
+                            error = null
+                        )
+                    }
                 }
-                _selectedServer.value = updated
-                _servers.value = _servers.value.map { if (it.id == updated.id) updated else it }
-                _error.value = null
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo actualizar el servidor"
+                _uiState.update { it.copy(error = "No se pudo actualizar el servidor") }
             }
         }
     }
 
     fun inviteMember(username: String) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                api.inviteMember(server.id, username.trim(), token)
-                _error.value = null
+                serverRepository.inviteMember(server.id, username)
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update { it.copy(error = null) }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo enviar la invitacion"
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update { it.copy(error = "No se pudo enviar la invitacion") }
+                }
             }
         }
     }
 
     fun updateMemberRole(userId: String, role: String) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val updated = api.updateMemberRole(server.id, userId, role, token)
-                _members.value = _members.value.map { if (it.userId == userId) updated else it }
-                    .sortedWith(compareBy<ServerMember> { roleOrder(it.role) }.thenBy { it.username.lowercase() })
-                _error.value = null
+                val updated = serverRepository.updateMemberRole(server.id, userId, role)
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update {
+                        it.copy(members = it.members.replaceAndSortMember(updated), error = null)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = e.message ?: "No se pudo cambiar el rol"
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update { it.copy(error = e.message ?: "No se pudo cambiar el rol") }
+                }
             }
         }
     }
 
     fun removeMember(userId: String) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                api.removeMember(server.id, userId, token)
-                _members.value = _members.value.filterNot { it.userId == userId }
-                _error.value = null
+                serverRepository.removeMember(server.id, userId)
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update {
+                        it.copy(
+                            members = it.members.filterNot { member -> member.userId == userId },
+                            error = null
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = e.message ?: "No se pudo expulsar al miembro"
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update { it.copy(error = e.message ?: "No se pudo expulsar al miembro") }
+                }
             }
         }
     }
@@ -239,15 +252,22 @@ class ServerViewModel : ViewModel() {
     fun acceptInvitation(invitationId: String, onAccepted: (Server) -> Unit = {}) {
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val server = api.acceptInvitation(invitationId, token)
-                _pendingInvitations.value = _pendingInvitations.value.filterNot { it.id == invitationId }
-                _servers.value = (_servers.value.filterNot { it.id == server.id } + server)
+                val server = serverRepository.acceptInvitation(invitationId)
+                _uiState.update {
+                    it.copy(
+                        pendingInvitations = it.pendingInvitations.filterNot { invitation ->
+                            invitation.id == invitationId
+                        },
+                        servers = it.servers.upsertServer(server),
+                        error = null
+                    )
+                }
                 selectServer(server)
-                _error.value = null
                 onAccepted(server)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo aceptar la invitacion"
+                _uiState.update { it.copy(error = "No se pudo aceptar la invitacion") }
             }
         }
     }
@@ -255,91 +275,125 @@ class ServerViewModel : ViewModel() {
     fun rejectInvitation(invitationId: String) {
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                api.rejectInvitation(invitationId, token)
-                _pendingInvitations.value = _pendingInvitations.value.filterNot { it.id == invitationId }
-                _error.value = null
+                serverRepository.rejectInvitation(invitationId)
+                _uiState.update {
+                    it.copy(
+                        pendingInvitations = it.pendingInvitations.filterNot { invitation ->
+                            invitation.id == invitationId
+                        },
+                        error = null
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo rechazar la invitacion"
+                _uiState.update { it.copy(error = "No se pudo rechazar la invitacion") }
             }
         }
     }
 
     fun leaveSelectedServer(onLeft: () -> Unit = {}) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                api.leaveServer(server.id, token)
-                _servers.value = _servers.value.filterNot { it.id == server.id }
-                clearSelection()
-                _error.value = null
+                serverRepository.leaveServer(server.id)
+                removeServerAndClearSelection(server.id)
                 onLeft()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo salir del servidor"
+                _uiState.update { it.copy(error = "No se pudo salir del servidor") }
             }
         }
     }
 
     fun deleteSelectedServer(onDeleted: () -> Unit = {}) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                api.deleteServer(server.id, token)
-                _servers.value = _servers.value.filterNot { it.id == server.id }
-                clearSelection()
-                _error.value = null
+                serverRepository.deleteServer(server.id)
+                removeServerAndClearSelection(server.id)
                 onDeleted()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo borrar el servidor"
+                _uiState.update { it.copy(error = "No se pudo borrar el servidor") }
             }
         }
     }
 
     fun createChannel(name: String) {
-        val server = _selectedServer.value ?: return
+        val server = _uiState.value.selectedServer ?: return
         viewModelScope.launch {
             try {
-                val token = SessionManager.getToken() ?: return@launch
-                val channel = api.createChannel(server.id, CreateChannelRequest(name.trim()), token)
-                _channels.value = _channels.value + channel
-                _error.value = null
+                val channel = serverRepository.createChannel(server.id, name)
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update { it.copy(channels = it.channels + channel, error = null) }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "No se pudo crear el canal"
+                if (_uiState.value.selectedServer?.id == server.id) {
+                    _uiState.update { it.copy(error = "No se pudo crear el canal") }
+                }
             }
         }
     }
 
     fun clearSelection() {
-        _selectedServer.value = null
-        _selectedChannel.value = null
-        _channels.value = emptyList()
-        _members.value = emptyList()
+        channelsLoadJob?.cancel()
+        membersLoadJob?.cancel()
+        _uiState.update {
+            it.copy(
+                selectedServer = null,
+                selectedChannel = null,
+                channels = emptyList(),
+                members = emptyList()
+            )
+        }
     }
 
-    private fun roleOrder(role: String): Int = when (role) {
-        "owner" -> 0
-        "admin" -> 1
-        else -> 2
+    private fun removeServerAndClearSelection(serverId: String) {
+        if (_uiState.value.selectedServer?.id == serverId) {
+            channelsLoadJob?.cancel()
+            membersLoadJob?.cancel()
+        }
+        _uiState.update { state ->
+            val updatedServers = state.servers.filterNot { server -> server.id == serverId }
+            if (state.selectedServer?.id == serverId) {
+                state.copy(
+                    servers = updatedServers,
+                    selectedServer = null,
+                    selectedChannel = null,
+                    channels = emptyList(),
+                    members = emptyList(),
+                    error = null
+                )
+            } else {
+                state.copy(servers = updatedServers, error = null)
+            }
+        }
     }
 
     private fun connectServerEvents() {
         serverEventsCollectJob = viewModelScope.launch {
-            serverWsClient.serverEvents.collect { event ->
+            serverEventsSource.events.collect { event ->
                 when (event.type) {
                     "ROLE_UPDATED" -> {
                         val role = event.role ?: return@collect
-                        _servers.value = _servers.value.map { server ->
-                            if (server.id == event.serverId) server.copy(myRole = role) else server
-                        }
-                        _selectedServer.value = _selectedServer.value?.let { server ->
-                            if (server.id == event.serverId) server.copy(myRole = role) else server
+                        _uiState.update { state ->
+                            state.copy(
+                                servers = state.servers.map { server ->
+                                    if (server.id == event.serverId) server.copy(myRole = role) else server
+                                },
+                                selectedServer = state.selectedServer?.let { server ->
+                                    if (server.id == event.serverId) server.copy(myRole = role) else server
+                                }
+                            )
                         }
                     }
                     "MEMBER_REMOVED", "SERVER_DELETED" -> {
-                        _servers.value = _servers.value.filterNot { it.id == event.serverId }
-                        if (_selectedServer.value?.id == event.serverId) clearSelection()
+                        removeServerAndClearSelection(event.serverId)
                         _accessRevoked.emit(event.serverId)
                     }
                 }
@@ -348,8 +402,8 @@ class ServerViewModel : ViewModel() {
         serverEventsJob = viewModelScope.launch {
             while (isActive) {
                 try {
-                    val token = SessionManager.getToken() ?: break
-                    serverWsClient.connectServerEvents(token)
+                    val token = accessTokenProvider.currentToken() ?: break
+                    serverEventsSource.connect(token)
                 } catch (_: Exception) {}
                 if (isActive) delay(1500)
             }
@@ -357,9 +411,11 @@ class ServerViewModel : ViewModel() {
     }
 
     override fun onCleared() {
+        channelsLoadJob?.cancel()
+        membersLoadJob?.cancel()
         serverEventsJob?.cancel()
         serverEventsCollectJob?.cancel()
-        serverWsClient.disconnect()
+        serverEventsSource.disconnect()
         super.onCleared()
     }
 }

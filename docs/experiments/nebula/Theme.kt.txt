@@ -1,0 +1,555 @@
+package com.matteo.chatapp.ui.theme
+
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+/**
+ * Nebula Theme System
+ *
+ * Una paleta cósmica con gradientes dinámicos y depth layers.
+ * Cada servidor/usuario puede tener su propio "aura" de color.
+ */
+enum class ThemeMode { DARK, LIGHT, SYSTEM }
+
+/**
+ * Acentos cósmicos predefinidos - cada uno tiene su gradiente característico
+ */
+enum class CosmicAccent(
+    val name: String,
+    val gradient: Brush,
+    val primary: Color,
+    val onPrimary: Color,
+    val glow: Color,
+    val surfaceTint: Color
+) {
+    NEBULA_VIOLET(
+        "Nebulosa Violeta",
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF6B4EFF), Color(0xFF9B59FF), Color(0xFFC06CFF)),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+        ),
+        Color(0xFF8B6FE8), Color.White, Color(0xFF8B6FE8), Color(0xFF3A305C)
+    ),
+    SOLAR_FLARE(
+        "Llamarada Solar",
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFFF6B35), Color(0xFFF7931E), Color(0xFFFFD700)),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+        ),
+        Color(0xFFFF8C42), Color.White, Color(0xFFF7931E), Color(0xFF5C3A1A)
+    ),
+    AURORA_TEAL(
+        "Aurora Verde",
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF00D4AA), Color(0xFF00F5D4), Color(0xFF84FAE0)),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+        ),
+        Color(0xFF2FA780), Color.White, Color(0xFF00F5D4), Color(0xFF1E4A3F)
+    ),
+    COSMIC_ROSE(
+        "Rosa Cósmico",
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFFF4E8C), Color(0xFFFF85B3), Color(0xFFFFC8DD)),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+        ),
+        Color(0xFFE46291), Color.White, Color(0xFFFF85B3), Color(0xFF57293A)
+    ),
+    VOID_BLUE(
+        "Azul Vacío",
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF3B82F6), Color(0xFF60A5FA), Color(0xFF93C5FD)),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+        ),
+        Color(0xFF4F7DF3), Color.White, Color(0xFF60A5FA), Color(0xFF26365F)
+    ),
+    STARLIGHT_GOLD(
+        "Oro Estelar",
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFFBBF24), Color(0xFFFCD34D), Color(0xFFFEF08A)),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+        ),
+        Color(0xFFF59E0B), Color(0xFF1F1F1F), Color(0xFFFCD34D), Color(0xFF5C4A1A)
+    )
+}
+
+/**
+ * Capas de profundidad para glassmorphism
+ */
+@Immutable
+data class DepthLayer(
+    val elevation: Int,
+    val blur: Float,
+    val opacity: Float,
+    val borderOpacity: Float
+) {
+    companion object {
+        val BASE = DepthLayer(0, 0f, 1f, 0f)
+        val SURFACE = DepthLayer(1, 8f, 0.9f, 0.08f)
+        val ELEVATED = DepthLayer(3, 16f, 0.95f, 0.12f)
+        val OVERLAY = DepthLayer(5, 24f, 0.98f, 0.16f)
+        val MODAL = DepthLayer(8, 32f, 1f, 0.2f)
+    }
+}
+
+/**
+ * Paleta completa con soporte para gradientes y glassmorphism
+ */
+@Immutable
+data class NebulaPalette(
+    // Fondos base
+    val background: Color,
+    val backgroundDeep: Color,
+    val backgroundGradient: Brush,
+
+    // Superficies con glassmorphism
+    val surface: Color,
+    val surfaceVariant: Color,
+    val surfaceElevated: Color,
+    val surfaceGlass: Color,      // Semi-transparente para glassmorphism
+    val surfaceGlassStrong: Color,
+
+    // Colores de acento (dinámicos por CosmicAccent)
+    val primary: Color,
+    val primaryGradient: Brush,
+    val primaryGlow: Color,
+    val onPrimary: Color,
+    val surfaceTint: Color,
+
+    // Estados
+    val accent: Color,
+    val warning: Color,
+    val error: Color,
+    val success: Color,
+
+    // Texto
+    val onBackground: Color,
+    val onSurface: Color,
+    val onSurfaceVariant: Color,
+    val muted: Color,
+    val outline: Color,
+
+    // Capas de profundidad
+    val depthSurface: DepthLayer,
+    val depthElevated: DepthLayer,
+    val depthOverlay: DepthLayer,
+    val depthModal: DepthLayer,
+
+    // Radios de esquina (más orgánicos)
+    val radiusSmall: Float = 8f,
+    val radiusMedium: Float = 12f,
+    val radiusLarge: Float = 16f,
+    val radiusFull: Float = 999f,
+
+    // Sombras suaves
+    val shadowColor: Color,
+    val shadowOpacity: Float = 0.15f
+)
+
+/**
+ * Paleta DARK MODE - Profunda y atmosférica
+ */
+private val DarkNebula = NebulaPalette(
+    background = Color(0xFF0A0A0F),
+    backgroundDeep = Color(0xFF050508),
+    backgroundGradient = Brush.linearGradient(
+        colors = listOf(
+            Color(0xFF0A0A0F),
+            Color(0xFF12101A),
+            Color(0xFF0D0B16),
+            Color(0xFF08080F)
+        ),
+        start = androidx.compose.ui.geometry.Offset(0f, 0f),
+        end = androidx.compose.ui.geometry.Offset(1f, 1f)
+    ),
+    surface = Color(0xFF14121A),
+    surfaceVariant = Color(0xFF1C1A24),
+    surfaceElevated = Color(0xFF24222E),
+    surfaceGlass = Color(0xCC1C1A24),      // 80% opacity
+    surfaceGlassStrong = Color(0xE6181622), // 90% opacity
+
+    primary = CosmicAccent.NEBULA_VIOLET.primary,
+    primaryGradient = CosmicAccent.NEBULA_VIOLET.gradient,
+    primaryGlow = CosmicAccent.NEBULA_VIOLET.glow,
+    onPrimary = CosmicAccent.NEBULA_VIOLET.onPrimary,
+    surfaceTint = CosmicAccent.NEBULA_VIOLET.surfaceTint,
+
+    accent = Color(0xFF00F5D4),
+    warning = Color(0xFFFBBF24),
+    error = Color(0xFFFF6B6B),
+    success = Color(0xFF22C55E),
+
+    onBackground = Color(0xFFF0EEF5),
+    onSurface = Color(0xFFC8C5D6),
+    onSurfaceVariant = Color(0xFF9A96AD),
+    muted = Color(0xFF6E6A7E),
+    outline = Color(0xFF2E2B3A),
+
+    depthSurface = DepthLayer.SURFACE,
+    depthElevated = DepthLayer.ELEVATED,
+    depthOverlay = DepthLayer.OVERLAY,
+    depthModal = DepthLayer.MODAL,
+
+    shadowColor = Color.Black,
+    shadowOpacity = 0.3f
+)
+
+/**
+ * Paleta LIGHT MODE - Etérea y luminosa
+ */
+private val LightNebula = NebulaPalette(
+    background = Color(0xFFFAF9FC),
+    backgroundDeep = Color(0xFFF0EFF5),
+    backgroundGradient = Brush.linearGradient(
+        colors = listOf(
+            Color(0xFFFAF9FC),
+            Color(0xFFF3F1FA),
+            Color(0xFFEDEBF5),
+            Color(0xFFF8F7FC)
+        ),
+        start = androidx.compose.ui.geometry.Offset(0f, 0f),
+        end = androidx.compose.ui.geometry.Offset(1f, 1f)
+    ),
+    surface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFFF5F3FA),
+    surfaceElevated = Color(0xFFEDEBF5),
+    surfaceGlass = Color(0xCCFFFFFF),
+    surfaceGlassStrong = Color(0xE6FFFFFF),
+
+    primary = CosmicAccent.NEBULA_VIOLET.primary,
+    primaryGradient = CosmicAccent.NEBULA_VIOLET.gradient,
+    primaryGlow = CosmicAccent.NEBULA_VIOLET.glow,
+    onPrimary = CosmicAccent.NEBULA_VIOLET.onPrimary,
+    surfaceTint = CosmicAccent.NEBULA_VIOLET.surfaceTint,
+
+    accent = Color(0xFF00A885),
+    warning = Color(0xFFB45309),
+    error = Color(0xFFDC2626),
+    success = Color(0xFF16A34A),
+
+    onBackground = Color(0xFF1A1820),
+    onSurface = Color(0xFF3D3A4A),
+    onSurfaceVariant = Color(0xFF6B687A),
+    muted = Color(0xFF8A869A),
+    outline = Color(0xFFE0DCE8),
+
+    depthSurface = DepthLayer.SURFACE,
+    depthElevated = DepthLayer.ELEVATED,
+    depthOverlay = DepthLayer.OVERLAY,
+    depthModal = DepthLayer.MODAL,
+
+    shadowColor = Color(0xFF3D3A4A),
+    shadowOpacity = 0.08f
+)
+
+// CompositionLocals para acceso global
+private val LocalNebulaPalette = staticCompositionLocalOf { DarkNebula }
+private val LocalCosmicAccent = staticCompositionLocalOf { CosmicAccent.NEBULA_VIOLET }
+private val LocalThemeMode = staticCompositionLocalOf { ThemeMode.DARK }
+
+/** Paleta actual */
+val Nebula: NebulaPalette @Composable get() = LocalNebulaPalette.current
+
+/** Acento cósmico actual */
+val Cosmic: CosmicAccent @Composable get() = LocalCosmicAccent.current
+
+/** Modo de tema actual */
+val CurrentThemeMode: ThemeMode @Composable get() = LocalThemeMode.current
+
+// Accesos rápidos a colores
+val Background @Composable get() = Nebula.background
+val BackgroundDeep @Composable get() = Nebula.backgroundDeep
+val BackgroundGradient @Composable get() = Nebula.backgroundGradient
+val Surface @Composable get() = Nebula.surface
+val SurfaceVariant @Composable get() = Nebula.surfaceVariant
+val SurfaceElevated @Composable get() = Nebula.surfaceElevated
+val SurfaceGlass @Composable get() = Nebula.surfaceGlass
+val SurfaceGlassStrong @Composable get() = Nebula.surfaceGlassStrong
+val Primary @Composable get() = Nebula.primary
+val PrimaryGradient @Composable get() = Nebula.primaryGradient
+val PrimaryGlow @Composable get() = Nebula.primaryGlow
+val OnPrimary @Composable get() = Nebula.onPrimary
+val SurfaceTint @Composable get() = Nebula.surfaceTint
+val Accent @Composable get() = Nebula.accent
+val Warning @Composable get() = Nebula.warning
+val Error @Composable get() = Nebula.error
+val Success @Composable get() = Nebula.success
+val OnBackground @Composable get() = Nebula.onBackground
+val OnSurface @Composable get() = Nebula.onSurface
+val OnSurfaceVariant @Composable get() = Nebula.onSurfaceVariant
+val Muted @Composable get() = Nebula.muted
+val Outline @Composable get() = Nebula.outline
+val ShadowColor @Composable get() = Nebula.shadowColor
+
+// Tipografía fluida y expresiva
+private val NebulaTypography = Typography(
+    displayLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = -0.5.sp
+    ),
+    displayMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
+        letterSpacing = -0.3.sp
+    ),
+    displaySmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 22.sp,
+        lineHeight = 28.sp
+    ),
+    headlineLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        lineHeight = 28.sp
+    ),
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 26.sp
+    ),
+    headlineSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        lineHeight = 24.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 24.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
+    ),
+    titleSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp
+    ),
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
+    ),
+    bodySmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp
+    ),
+    labelLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
+    ),
+    labelMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp,
+        lineHeight = 16.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 14.sp
+    )
+)
+
+// Formas orgánicas y suaves
+private val NebulaShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(24.dp)
+)
+
+/**
+ * Tema principal de la app - Nebula
+ */
+@Composable
+fun NebulaTheme(
+    themeMode: ThemeMode = ThemeMode.DARK,
+    cosmicAccent: CosmicAccent = CosmicAccent.NEBULA_VIOLET,
+    content: @Composable () -> Unit
+) {
+    val basePalette = if (themeMode == ThemeMode.DARK) DarkNebula else LightNebula
+    val palette = basePalette.copy(
+        primary = cosmicAccent.primary,
+        primaryGradient = cosmicAccent.gradient,
+        primaryGlow = cosmicAccent.glow,
+        onPrimary = cosmicAccent.onPrimary,
+        surfaceTint = cosmicAccent.surfaceTint
+    )
+
+    // ColorScheme Material3 para compatibilidad
+    val colorScheme = if (themeMode == ThemeMode.DARK) {
+        darkColorScheme(
+            primary = palette.primary,
+            onPrimary = palette.onPrimary,
+            primaryContainer = palette.surfaceTint.copy(alpha = 0.2f),
+            onPrimaryContainer = palette.onBackground,
+            secondary = palette.accent,
+            onSecondary = palette.onBackground,
+            secondaryContainer = palette.surfaceVariant,
+            onSecondaryContainer = palette.onSurface,
+            tertiary = palette.warning,
+            onTertiary = palette.onBackground,
+            error = palette.error,
+            onError = Color.White,
+            errorContainer = palette.error.copy(alpha = 0.15f),
+            onErrorContainer = palette.error,
+            background = palette.background,
+            onBackground = palette.onBackground,
+            surface = palette.surface,
+            onSurface = palette.onSurface,
+            surfaceVariant = palette.surfaceVariant,
+            onSurfaceVariant = palette.onSurfaceVariant,
+            outline = palette.outline,
+            outlineVariant = palette.outline.copy(alpha = 0.5f),
+            shadow = palette.shadowColor,
+            scrim = palette.shadowColor,
+            inverseSurface = palette.onBackground,
+            inverseOnSurface = palette.background,
+            inversePrimary = palette.primaryGlow
+        )
+    } else {
+        lightColorScheme(
+            primary = palette.primary,
+            onPrimary = palette.onPrimary,
+            primaryContainer = palette.surfaceTint.copy(alpha = 0.15f),
+            onPrimaryContainer = palette.onBackground,
+            secondary = palette.accent,
+            onSecondary = palette.onBackground,
+            secondaryContainer = palette.surfaceVariant,
+            onSecondaryContainer = palette.onSurface,
+            tertiary = palette.warning,
+            onTertiary = palette.onBackground,
+            error = palette.error,
+            onError = Color.White,
+            errorContainer = palette.error.copy(alpha = 0.1f),
+            onErrorContainer = palette.error,
+            background = palette.background,
+            onBackground = palette.onBackground,
+            surface = palette.surface,
+            onSurface = palette.onSurface,
+            surfaceVariant = palette.surfaceVariant,
+            onSurfaceVariant = palette.onSurfaceVariant,
+            outline = palette.outline,
+            outlineVariant = palette.outline.copy(alpha = 0.5f),
+            shadow = palette.shadowColor,
+            scrim = palette.shadowColor,
+            inverseSurface = palette.onBackground,
+            inverseOnSurface = palette.background,
+            inversePrimary = palette.primary
+        )
+    }
+
+    CompositionLocalProvider(
+        LocalNebulaPalette provides palette,
+        LocalCosmicAccent provides cosmicAccent,
+        LocalThemeMode provides themeMode
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = NebulaTypography,
+            shapes = NebulaShapes,
+            content = content
+        )
+    }
+}
+
+/**
+ * Helper para crear gradiente personalizado de servidor/usuario
+ */
+@Composable
+fun rememberServerGradient(
+    serverId: String,
+    accent: CosmicAccent = CosmicAccent.NEBULA_VIOLET
+): Brush {
+    return remember(serverId, accent) {
+        // Generar gradiente determinista basado en ID
+        val hash = serverId.hashCode()
+        val hueOffset = (hash % 360).toFloat()
+
+        // Usar el acento base pero con variación
+        Brush.sweepGradient(
+            center = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+            colors = listOf(
+                accent.primary.copy(alpha = 0.8f),
+                accent.glow.copy(alpha = 0.6f),
+                accent.primary.copy(alpha = 0.4f),
+                accent.glow.copy(alpha = 0.2f),
+                accent.primary.copy(alpha = 0.8f)
+            ),
+            startAngle = hueOffset,
+            endAngle = hueOffset + 360f
+        )
+    }
+}
+
+/**
+ * Helper para gradiente de avatar (aura)
+ */
+@Composable
+fun rememberAvatarAura(
+    userId: String,
+    accent: CosmicAccent = CosmicAccent.NEBULA_VIOLET
+): Brush {
+    return remember(userId, accent) {
+        val hash = userId.hashCode()
+        val baseHue = (hash % 360).toFloat()
+
+        Brush.radialGradient(
+            center = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+            radius = 0.8f,
+            colors = listOf(
+                accent.primary.copy(alpha = 0.0f),
+                accent.primary.copy(alpha = 0.15f),
+                accent.glow.copy(alpha = 0.35f),
+                accent.primary.copy(alpha = 0.5f)
+            )
+        )
+    }
+}

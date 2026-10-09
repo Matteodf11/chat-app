@@ -8,8 +8,7 @@ import com.matteo.chatapp.ui.screens.MainScreen
 import com.matteo.chatapp.ui.theme.ChatAppTheme
 import com.matteo.chatapp.ui.theme.ThemeAccent
 import com.matteo.chatapp.ui.theme.ThemeMode
-import com.matteo.chatapp.network.AuthApi
-import com.matteo.chatapp.network.createHttpClient
+import com.matteo.chatapp.di.AppContainer
 import com.matteo.chatapp.network.SessionRefresher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -23,7 +22,11 @@ import androidx.compose.material3.CircularProgressIndicator
 fun App() {
     var themeMode by remember { mutableStateOf(ThemePreferences.getThemeMode()) }
     var themeAccent by remember { mutableStateOf(ThemePreferences.getThemeAccent()) }
-    val authApi = remember { AuthApi(createHttpClient()) }
+    val appContainer = remember { AppContainer() }
+
+    DisposableEffect(appContainer) {
+        onDispose { appContainer.close() }
+    }
 
     ChatAppTheme(themeMode = themeMode, themeAccent = themeAccent) {
         var sessionKey by remember { mutableStateOf(0) }
@@ -65,6 +68,9 @@ fun App() {
         } else if (isLoggedIn) {
             key(sessionKey) {
                 MainScreen(
+                    createServerViewModel = appContainer::createServerViewModel,
+                    createChatViewModel = appContainer::createChatViewModel,
+                    createFriendViewModel = appContainer::createFriendViewModel,
                     sessionKey = sessionKey,
                     themeMode = themeMode,
                     themeAccent = themeAccent,
@@ -79,7 +85,7 @@ fun App() {
                     onLogout = {
                         val refreshToken = SessionManager.getRefreshToken()
                         if (refreshToken != null) {
-                            scope.launch { runCatching { authApi.logout(refreshToken) } }
+                            scope.launch { runCatching { appContainer.authRepository.logout(refreshToken) } }
                         }
                         SessionManager.clearSession()
                         isLoggedIn = false
@@ -89,6 +95,7 @@ fun App() {
             }
         } else {
             LoginScreen(
+                createAuthViewModel = appContainer::createAuthViewModel,
                 sessionKey = sessionKey,
                 onLoginSuccess = {
                     sessionKey++

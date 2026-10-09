@@ -70,10 +70,13 @@ import chat_app.shared.generated.resources.chimera_logo
 
 @Composable
 fun LoginScreen(
+    createAuthViewModel: () -> AuthViewModel,
     sessionKey: Int = 0,
     onLoginSuccess: () -> Unit
 ) {
-    val viewModel: AuthViewModel = viewModel(key = "auth-$sessionKey") { AuthViewModel() }
+    val viewModel: AuthViewModel = viewModel(key = "auth-$sessionKey") {
+        createAuthViewModel()
+    }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
