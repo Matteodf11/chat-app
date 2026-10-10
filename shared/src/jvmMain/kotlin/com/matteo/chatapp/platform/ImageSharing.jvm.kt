@@ -1,5 +1,8 @@
 package com.matteo.chatapp.platform
 
+import androidx.compose.ui.graphics.toAwtImage
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import com.matteo.chatapp.ui.components.orientPickedImage
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
@@ -15,11 +18,13 @@ actual fun imageShareActionLabel(): String = "Copiar imagen"
 actual suspend fun shareImage(url: String, fileName: String, contentType: String): ImageShareResult = withContext(Dispatchers.IO) {
     val file = prepareSharedImage(url, fileName, File(System.getProperty("java.io.tmpdir"), "chimera-shared-images"))
     // Include both an image and the original file: receivers choose the format they support.
-    val image = ImageIO.read(file) ?: org.jetbrains.skia.Image.makeFromEncoded(file.readBytes()).use { source ->
+    val bytes = file.readBytes()
+    val decoded = ImageIO.read(ByteArrayInputStream(bytes)) ?: org.jetbrains.skia.Image.makeFromEncoded(bytes).use { source ->
         val png = source.encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)?.bytes
             ?: error("No se pudo copiar la imagen")
         ImageIO.read(ByteArrayInputStream(png)) ?: error("No se pudo copiar la imagen")
     }
+    val image = orientPickedImage(decoded.toComposeImageBitmap(), bytes).toAwtImage()
     val transferable = object : Transferable {
         override fun getTransferDataFlavors(): Array<DataFlavor> = arrayOf(DataFlavor.imageFlavor, DataFlavor.javaFileListFlavor)
         override fun isDataFlavorSupported(flavor: DataFlavor): Boolean = flavor == DataFlavor.imageFlavor || flavor == DataFlavor.javaFileListFlavor

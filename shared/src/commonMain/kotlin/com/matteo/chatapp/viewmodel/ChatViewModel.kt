@@ -39,6 +39,12 @@ class ChatViewModel(
     private val personalMessagesSource: PersonalMessagesSource,
     private val inboxEventsSource: DmInboxEventsSource,
     private val notifications: MessageNotificationSink = MessageNotificationSink { },
+    private val attachmentDownloader: suspend (Message) -> PickedAttachmentFile = { message ->
+        com.matteo.chatapp.platform.downloadAttachmentFile(
+            message.attachmentUrl ?: error("Este archivo ya no está disponible"),
+            message.attachmentName ?: "archivo",
+            message.attachmentContentType ?: "application/octet-stream")
+    },
     private val localStore: com.matteo.chatapp.repository.ChatLocalStore = object : com.matteo.chatapp.repository.ChatLocalStore {}
 ) : ViewModel() {
     suspend fun refreshAttachment(message: Message): Message = chatRepository.refreshMessage(message.id)
@@ -55,6 +61,49 @@ class ChatViewModel(
     val dmPreferences = _dmPreferences.asStateFlow()
     private val _preferencesError = MutableStateFlow<String?>(null)
     val preferencesError = _preferencesError.asStateFlow()
+    private val _imageGallery = MutableStateFlow(ImageGalleryUiState())
+    val imageGallery = _imageGallery.asStateFlow()
+    private var imageGalleryJob: Job? = null
+
+    fun openImageGallery(message: Message) {
+        imageGalleryJob?.cancel()
+        _imageGallery.value = ImageGalleryUiState(message,
+            galleryImages(message, listOf(message) + _conversationState.value.messages + _sharedItems.value.messages))
+        loadMoreGalleryImages()
+    }
+
+    fun closeImageGallery() { imageGalleryJob?.cancel(); _imageGallery.value = ImageGalleryUiState() }
+
+    fun loadMoreGalleryImages() {
+        val state = _imageGallery.value
+        val anchor = state.anchor ?: return
+        if (state.loading || !state.hasMore) return
+        _imageGallery.update { it.copy(loading = true, error = null) }
+        imageGalleryJob = viewModelScope.launch {
+            try {
+                var cursor = state.cursor
+                var hasMore: Boolean
+                var pictures: List<Message>
+                do {
+                    val previous = cursor
+                    val page = if (anchor.dmId != null) chatRepository.sharedItems(anchor.dmId, "media", cursor)
+                        else {
+                            val messages = chatRepository.loadMessages(ConversationTarget.Channel(anchor.channelId ?: error("Chat no disponible")), cursor)
+                            com.matteo.chatapp.model.SharedItemsPage(messages.messages, messages.hasMore,
+                                messages.messages.firstOrNull()?.createdAt)
+                        }
+                    cursor = page.nextBefore
+                    hasMore = page.hasMore
+                    check(!hasMore || (cursor != null && cursor != previous)) { "No se pudo avanzar en las fotos anteriores" }
+                    pictures = galleryImages(anchor, page.messages)
+                } while (pictures.isEmpty() && hasMore)
+                _imageGallery.update { it.copy(images = galleryImages(anchor, pictures + it.images),
+                    cursor = cursor, hasMore = hasMore, loading = false) }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { _imageGallery.update { it.copy(loading = false, error = "No se pudieron cargar las fotos anteriores") } }
+        }
+    }
+
     private val _sharedItems = MutableStateFlow(SharedItemsUiState())
     val sharedItems = _sharedItems.asStateFlow()
     private var sharedItemsJob: Job? = null
@@ -263,15 +312,36 @@ class ChatViewModel(
         }
     }
 
+    private val forwarding = mutableSetOf<Pair<String, ConversationTarget>>()
+
+    fun forwardMessage(message: Message, target: ConversationTarget, onResult: (String?) -> Unit) {
+        val key = message.id to target
+        if (stopped) { onResult("La sesión se ha cerrado"); return }
+        if (!forwarding.add(key)) return
+        val finish: (String?) -> Unit = { error -> forwarding.remove(key); onResult(error) }
+        viewModelScope.launch {
+            try {
+                require(message.dmId != target.id && message.channelId != target.id) { "Elige otro chat para reenviar" }
+                val fresh = chatRepository.refreshMessage(message.id)
+                require(!fresh.deleted) { "El mensaje se ha eliminado" }
+                val file = if (fresh.attachmentName != null) attachmentDownloader(fresh) else null
+                require(fresh.content.isNotBlank() || file != null) { "El mensaje ya no está disponible" }
+                enqueue(target, fresh.content, null, file, { finish(null) }, finish)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { finish(e.message ?: "No se pudo preparar el reenvío") }
+        }
+    }
+
     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
-    private fun enqueue(target: ConversationTarget, content: String, replyToId: String?, file: PickedAttachmentFile?, onQueued: () -> Unit) {
-        if (content.isBlank() && file == null) return
+    private fun enqueue(target: ConversationTarget, content: String, replyToId: String?, file: PickedAttachmentFile?, onQueued: () -> Unit, onFailure: (String?) -> Unit = {}) {
+        if (content.isBlank() && file == null) { onFailure("El mensaje está vacío"); return }
         if (content.length > 4000) {
             _conversationState.update { it.copy(error = "El mensaje no puede superar 4000 caracteres") }
+            onFailure("El mensaje no puede superar 4000 caracteres")
             return
         }
         val pending = PendingMessage(kotlin.uuid.Uuid.random().toString(), target, content.trim(), replyToId, file)
-        if (stopped || !enqueueingTargets.add(target)) return
+        if (stopped || !enqueueingTargets.add(target)) { onFailure("Hay otro envío guardándose. Vuelve a intentarlo."); return }
         viewModelScope.launch {
             try {
                 restored.await()
@@ -283,6 +353,7 @@ class ChatViewModel(
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) {
                 _conversationState.update { it.copy(error = "No se pudo guardar el envío. El mensaje sigue en el editor.") }
+                onFailure("No se pudo guardar el reenvío. Puedes volver a intentarlo.")
             } finally { enqueueingTargets.remove(target) }
         }
     }
@@ -483,6 +554,7 @@ class ChatViewModel(
     }
 
     fun disconnectRealtime() {
+        imageGalleryJob?.cancel()
         stopped = true
         sharedItemsJob?.cancel()
         resetRealtime()

@@ -1,5 +1,6 @@
 package com.matteo.chatapp.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,12 +13,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.PersonOutline
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.window.DialogProperties
+import com.matteo.chatapp.ui.components.decodePickedImage
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -131,143 +144,172 @@ internal fun ProfileSettingsDialog(
     var usernameInput by remember(username) { mutableStateOf(username) }
     var statusInput by remember(status) { mutableStateOf(status.ifBlank { "Disponible" }) }
     var bioInput by remember(bio) { mutableStateOf(bio) }
-    var selectedAvatarName by remember { mutableStateOf<String?>(null) }
     var selectedAvatarFile by remember { mutableStateOf<PickedAvatarFile?>(null) }
-    var selectedBannerName by remember { mutableStateOf<String?>(null) }
     var selectedBannerFile by remember { mutableStateOf<PickedAvatarFile?>(null) }
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Surface,
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 0.dp,
-        title = { Text("Ajustes de perfil", color = OnBackground, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                error?.let { Text(it, color = Error, fontSize = 12.sp) }
-                ProfilePreviewCard(
-                    username = usernameInput.ifBlank { username },
-                    avatarUrl = avatarUrl,
-                    bannerUrl = bannerUrl,
-                    status = statusInput,
-                    online = true
-                )
-                Text("Email: $email", color = Muted, fontSize = 12.sp)
-                SettingsField("Nombre de usuario", usernameInput) { usernameInput = it }
-                OutlinedTextField(
-                    value = bioInput,
-                    onValueChange = { if (it.length <= 300) bioInput = it },
-                    label = { Text("Sobre mí") },
-                    placeholder = { Text("Cuéntanos algo sobre ti", color = Muted) },
-                    supportingText = { Text("${bioInput.length}/300 · Opcional", color = Muted) },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3,
-                    maxLines = 5,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = OnBackground, unfocusedTextColor = OnBackground,
-                        focusedBorderColor = Primary, unfocusedBorderColor = Outline
-                    )
-                )
-                Text("Estado", color = OnBackground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    statusOptions.forEach { option ->
-                        FilterChip(
-                            selected = statusInput == option,
-                            onClick = { statusInput = option },
-                            label = { Text(option) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = SurfaceElevated,
-                                selectedLabelColor = OnBackground,
-                                labelColor = OnSurface
-                            )
-                        )
-                    }
+    var section by remember { mutableStateOf(0) }
+    val profileScroll = rememberScrollState()
+    val securityScroll = rememberScrollState()
+    var pickingImage by remember { mutableStateOf(false) }
+    var imageError by remember { mutableStateOf<String?>(null) }
+    val busy = changingPassword || savingProfile || pickingImage
+    val avatarPreview by produceState<ImageBitmap?>(null, selectedAvatarFile) {
+        value = selectedAvatarFile?.let { decodePickedImage(it.bytes, 256) }
+    }
+    val bannerPreview by produceState<ImageBitmap?>(null, selectedBannerFile) {
+        value = selectedBannerFile?.let { decodePickedImage(it.bytes, 1024) }
+    }
+    fun chooseImage(avatar: Boolean) {
+        pickingImage = true
+        imageError = null
+        scope.launch {
+            try {
+                val picked = pickProfileImageFile(if (avatar) "Seleccionar foto de perfil" else "Seleccionar portada")
+                if (picked != null) {
+                    if (picked.bytes.size > 2 * 1024 * 1024) imageError = "Elige una imagen de hasta 2 MB"
+                    else if (avatar) selectedAvatarFile = picked else selectedBannerFile = picked
                 }
-                HorizontalDivider(color = Outline)
-                Text("Imagenes", color = OnBackground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val picked = pickProfileImageFile("Seleccionar avatar")
-                                if (picked != null) {
-                                    selectedAvatarName = picked.fileName
-                                    selectedAvatarFile = picked
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceElevated)
-                    ) {
-                        Icon(Icons.Rounded.Image, contentDescription = null, tint = OnBackground, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("Avatar", color = OnBackground)
-                    }
-                    Text(selectedAvatarName ?: "Sin cambios", color = Muted, fontSize = 12.sp)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val picked = pickProfileImageFile("Seleccionar banner de perfil")
-                                if (picked != null) {
-                                    selectedBannerName = picked.fileName
-                                    selectedBannerFile = picked
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceElevated)
-                    ) {
-                        Icon(Icons.Rounded.Image, contentDescription = null, tint = OnBackground, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("Banner", color = OnBackground)
-                    }
-                    Text(selectedBannerName ?: "JPG, PNG o WEBP - max. 2 MB", color = Muted, fontSize = 12.sp)
-                }
-                HorizontalDivider(color = Outline)
-                Text("Seguridad", color = OnBackground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text("Usa entre 10 y 72 caracteres. Al cambiarla tendrás que iniciar sesión de nuevo en tus dispositivos.", color = Muted, fontSize = 12.sp)
-                PasswordSettingsField("Contraseña actual", currentPassword, !changingPassword) { currentPassword = it }
-                PasswordSettingsField("Nueva contraseña", newPassword, !changingPassword) { newPassword = it }
-                PasswordSettingsField("Repite la nueva contraseña", confirmPassword, !changingPassword) { confirmPassword = it }
-                if (confirmPassword.isNotEmpty() && confirmPassword != newPassword) {
-                    Text("Las contraseñas no coinciden", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                }
-                passwordError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
-                Button(
-                    onClick = { onChangePassword(currentPassword, newPassword) },
-                    enabled = !changingPassword && !savingProfile && currentPassword.isNotBlank() &&
-                        newPassword.length in 10..72 && newPassword == confirmPassword,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceElevated)
-                ) {
-                    Text(if (changingPassword) "Cambiando…" else "Cambiar contraseña")
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(usernameInput, statusInput, bioInput, selectedAvatarFile, selectedBannerFile) },
-                enabled = !changingPassword && !savingProfile,
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Primary)
-            ) {
-                Text(if (savingProfile) "Guardando…" else "Guardar perfil", color = OnPrimary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar", color = OnSurface) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { imageError = e.message ?: "No se pudo abrir la imagen" }
+            finally { pickingImage = false }
         }
-    )
+    }
+
+    Dialog(onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().padding(12.dp).imePadding()
+            .heightIn(max = 760.dp), shape = RoundedCornerShape(24.dp), color = Surface) {
+            Column {
+                Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Tu perfil", style = MaterialTheme.typography.titleLarge, color = OnBackground)
+                        Text("Dale tu toque personal", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                    }
+                    IconButton(onClick = onDismiss, enabled = !busy) { Icon(Icons.Rounded.Close, "Cerrar perfil") }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("Perfil" to Icons.Rounded.PersonOutline, "Seguridad" to Icons.Rounded.Lock).forEachIndexed { index, (label, icon) ->
+                        Surface(onClick = { section = index }, modifier = Modifier.weight(1f).semantics {
+                            role = Role.Tab
+                            selected = section == index
+                        },
+                            shape = RoundedCornerShape(14.dp), color = if (section == index) PrimarySoft else SurfaceVariant) {
+                            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(icon, null, tint = if (section == index) Primary else Muted, modifier = Modifier.size(20.dp))
+                                Text(label, color = OnBackground, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                Column(Modifier.weight(1f, fill = false).verticalScroll(if (section == 0) profileScroll else securityScroll)
+                    .padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    if (section == 0) {
+                        ProfilePreviewCard(usernameInput.ifBlank { username }, avatarUrl, bannerUrl, statusInput,
+                            email, avatarPreview, bannerPreview)
+                        error?.let { Text(it, color = Error, style = MaterialTheme.typography.bodyMedium) }
+                        imageError?.let { Text(it, color = Error, style = MaterialTheme.typography.bodyMedium) }
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Imágenes del perfil", style = MaterialTheme.typography.titleMedium, color = OnBackground)
+                            ProfileImageOption("Foto de perfil", selectedAvatarFile?.fileName, !busy,
+                                onChoose = { chooseImage(true) }, onReset = { selectedAvatarFile = null })
+                            ProfileImageOption("Portada", selectedBannerFile?.fileName, !busy,
+                                onChoose = { chooseImage(false) }, onReset = { selectedBannerFile = null })
+                            Text("JPG, PNG o WEBP · Hasta 2 MB por imagen", color = Muted, style = MaterialTheme.typography.labelMedium)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Acerca de ti", style = MaterialTheme.typography.titleMedium, color = OnBackground)
+                            OutlinedTextField(usernameInput, { usernameInput = it }, label = { Text("Nombre de usuario") },
+                                enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                            OutlinedTextField(bioInput, { if (it.length <= 300) bioInput = it },
+                                label = { Text("Sobre mí") }, placeholder = { Text("Cuéntanos algo sobre ti") },
+                                supportingText = { Text("${bioInput.length}/300 · Opcional") }, enabled = !busy,
+                                modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5, shape = RoundedCornerShape(14.dp))
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Tu estado", style = MaterialTheme.typography.titleMedium, color = OnBackground)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                statusOptions.forEach { option ->
+                                    FilterChip(selected = statusInput == option, onClick = { statusInput = option }, enabled = !busy,
+                                        label = { Text(option) }, leadingIcon = {
+                                            Box(Modifier.size(8.dp).clip(CircleShape).background(profileStatusColor(option)))
+                                        }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PrimarySoft,
+                                            selectedLabelColor = OnBackground, labelColor = OnSurface))
+                                }
+                            }
+                        }
+                    } else {
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SurfaceVariant).padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Rounded.Lock, null, tint = Primary)
+                            Text("Protege tu cuenta", style = MaterialTheme.typography.titleMedium, color = OnBackground)
+                            Text("Usa entre 10 y 72 caracteres. Al cambiar la contraseña tendrás que iniciar sesión de nuevo en tus dispositivos.",
+                                style = MaterialTheme.typography.bodyMedium, color = Muted)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            PasswordSettingsField("Contraseña actual", currentPassword, !busy) { currentPassword = it }
+                            PasswordSettingsField("Nueva contraseña", newPassword, !busy) { newPassword = it }
+                            PasswordSettingsField("Repite la nueva contraseña", confirmPassword, !busy) { confirmPassword = it }
+                            if (confirmPassword.isNotEmpty() && confirmPassword != newPassword)
+                                Text("Las contraseñas no coinciden", color = Error, style = MaterialTheme.typography.bodyMedium)
+                            passwordError?.let { Text(it, color = Error, style = MaterialTheme.typography.bodyMedium) }
+                        }
+                    }
+                }
+                HorizontalDivider(color = Outline)
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancelar") }
+                    Button(modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                        enabled = !busy && if (section == 0) usernameInput.isNotBlank() else
+                            currentPassword.isNotBlank() && newPassword.length in 10..72 && newPassword == confirmPassword,
+                        onClick = {
+                            if (section == 0) onSave(usernameInput, statusInput, bioInput, selectedAvatarFile, selectedBannerFile)
+                            else onChangePassword(currentPassword, newPassword)
+                        }) {
+                        if (savingProfile || changingPassword) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = OnPrimary)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(if (section == 0) { if (savingProfile) "Guardando…" else "Guardar cambios" }
+                            else if (changingPassword) "Cambiando…" else "Cambiar contraseña")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileImageOption(title: String, selectedName: String?, enabled: Boolean,
+    onChoose: () -> Unit, onReset: () -> Unit) {
+    Surface(onClick = onChoose, enabled = enabled, shape = RoundedCornerShape(14.dp), color = SurfaceVariant) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Rounded.Image, null, tint = Primary, modifier = Modifier.size(22.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, color = OnBackground, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(selectedName ?: "Toca para cambiar", color = Muted, style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (selectedName != null) IconButton(onClick = onReset, enabled = enabled) { Icon(Icons.Rounded.Close, "Deshacer cambio de $title", tint = Muted) }
+            else IconButton(onClick = onChoose, enabled = enabled) { Icon(Icons.Rounded.Edit, "Cambiar $title", tint = Muted) }
+        }
+    }
+}
+
+@Composable
+private fun profileStatusColor(status: String): Color = when (status) {
+    "Disponible" -> Accent
+    "Ausente" -> Warning
+    "Ocupado" -> Error
+    else -> Muted
 }
 
 @Composable
@@ -278,6 +320,7 @@ private fun PasswordSettingsField(label: String, value: String, enabled: Boolean
         label = { Text(label) },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
+        shape = RoundedCornerShape(14.dp),
         enabled = enabled,
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
@@ -293,62 +336,33 @@ private fun PasswordSettingsField(label: String, value: String, enabled: Boolean
 }
 
 @Composable
-private fun ProfilePreviewCard(
-    username: String,
-    avatarUrl: String,
-    bannerUrl: String,
-    status: String,
-    online: Boolean
-) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 360.dp)
-                .fillMaxWidth()
-                .height(184.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(SurfaceVariant)
-        ) {
-            ProfileBannerImage(
-                bannerUrl = bannerUrl,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(118.dp)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 26.dp, top = 70.dp)
-                    .size(96.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceVariant)
-                    .padding(6.dp)
-            ) {
-                AvatarImage(avatarUrl = avatarUrl, name = username.ifBlank { "?" }, size = 84)
+private fun ProfilePreviewCard(username: String, avatarUrl: String, bannerUrl: String, status: String,
+    email: String, avatarPreview: ImageBitmap?, bannerPreview: ImageBitmap?) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(SurfaceVariant)) {
+        Box(Modifier.fillMaxWidth().height(144.dp)) {
+            if (bannerPreview != null) Image(bannerPreview, "Vista previa de la portada", Modifier.fillMaxWidth().height(100.dp),
+                contentScale = ContentScale.Crop)
+            else ProfileBannerImage(bannerUrl, Modifier.fillMaxWidth().height(100.dp))
+            Box(Modifier.align(Alignment.BottomStart).padding(start = 18.dp).size(88.dp)
+                .clip(CircleShape).background(SurfaceVariant).padding(5.dp)) {
+                if (avatarPreview != null) Image(avatarPreview, "Vista previa de tu foto", Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop)
+                else AvatarImage(avatarUrl, username.ifBlank { "?" }, 78)
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 102.dp, top = 132.dp)
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceVariant)
-                    .padding(5.dp)
-            ) {
-                Box(Modifier.fillMaxSize().clip(CircleShape).background(if (online) Accent else Muted))
+            Surface(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 10.dp),
+                shape = RoundedCornerShape(50), color = Surface) {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(profileStatusColor(status)))
+                    Text(status, style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                }
             }
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 138.dp, end = 18.dp, bottom = 18.dp)
-            ) {
-                Text(username.ifBlank { "Tu perfil" }, color = OnBackground, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Text(status.ifBlank { "Disponible" }, color = Muted, fontSize = 12.sp)
-            }
+        }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(username.ifBlank { "Tu perfil" }, color = OnBackground, fontSize = 24.sp, lineHeight = 30.sp,
+                fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(email, color = Muted, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

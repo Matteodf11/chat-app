@@ -3,6 +3,7 @@ package com.matteo.chatapp.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.automirrored.rounded.Forward
 import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -52,6 +54,7 @@ fun MessageItem(
     highlighted: Boolean = false,
     onOpenImage: (Message) -> Unit = {},
     onDownload: (Message) -> Unit = {},
+    onForward: ((Message) -> Unit)? = null,
     allowEdit: Boolean = true
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -157,56 +160,40 @@ fun MessageItem(
                 Text(sentMetadata, modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
                     color = Muted, fontSize = 11.sp)
             }
-            Box {
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    containerColor = SurfaceElevated
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Responder") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Reply, contentDescription = null) },
-                        onClick = {
-                            showMenu = false
-                            onReply()
-                        }
-                    )
-                    val location = com.matteo.chatapp.platform.sharedLocationFromMessage(message.content)
-            if (location != null) {
-                OutlinedButton(onClick = { openExternalUrl(location.mapUrl) }) {
-                    Column { Text("Ubicación compartida"); Text("Ver en el mapa", fontSize = 12.sp) }
+            if (showMenu) ActionSheet("Mensaje de ${message.senderUsername}", { showMenu = false },
+                avatarName = message.senderUsername, avatarUrl = message.senderAvatar) {
+                ActionSheetItem("Responder", Icons.AutoMirrored.Rounded.Reply) {
+                    showMenu = false
+                    onReply()
                 }
-            }
-            if (message.content.isNotBlank() && location == null) {
-                        DropdownMenuItem(
-                            text = { Text("Copiar") },
-                            leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
-                            onClick = {
-                                copyTextToClipboard(message.content)
-                                showMenu = false
-                            }
-                        )
+                if (!message.deleted) onForward?.let { forward ->
+                    ActionSheetItem("Reenviar", Icons.AutoMirrored.Rounded.Forward) {
+                        showMenu = false
+                        forward(message)
                     }
-                    if (canModify && allowEdit && message.content.isNotBlank()) {
-                        DropdownMenuItem(
-                            text = { Text("Editar") },
-                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                            onClick = {
-                                editedContent = message.content
-                                showMenu = false
-                                showEditDialog = true
-                            }
-                        )
+                }
+                if (location != null) {
+                    ActionSheetItem("Ver ubicación", Icons.Rounded.LocationOn) {
+                        showMenu = false
+                        openExternalUrl(location.mapUrl)
                     }
-                    if (canModify) {
-                        DropdownMenuItem(
-                            text = { Text("Borrar") },
-                            leadingIcon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null) },
-                            onClick = {
-                                showMenu = false
-                                showDeleteDialog = true
-                            }
-                        )
+                } else if (message.content.isNotBlank()) {
+                    ActionSheetItem("Copiar", Icons.Rounded.ContentCopy) {
+                        copyTextToClipboard(message.content)
+                        showMenu = false
+                    }
+                }
+                if (canModify && allowEdit && message.content.isNotBlank()) {
+                    ActionSheetItem("Editar", Icons.Rounded.Edit) {
+                        editedContent = message.content
+                        showMenu = false
+                        showEditDialog = true
+                    }
+                }
+                if (canModify) {
+                    ActionSheetItem("Borrar", Icons.Rounded.DeleteOutline) {
+                        showMenu = false
+                        showDeleteDialog = true
                     }
                 }
             }
@@ -260,7 +247,7 @@ private fun AttachmentCard(message: Message, onOpenImage: (Message) -> Unit, onD
         SharedMediaThumbnail(message.attachmentUrl, message.attachmentName,
             Modifier.widthIn(max = 360.dp).clip(MaterialTheme.shapes.medium)
                 .clickable(enabled = message.attachmentUrl != null, onClickLabel = "Ver imagen") { onOpenImage(message) },
-            maxEdge = 1024, showFullImage = true)
+            maxEdge = 1024, showFullImage = true, cacheKey = message.id)
         return
     }
     if (message.attachmentContentType?.startsWith("audio/") == true && message.attachmentUrl != null) {

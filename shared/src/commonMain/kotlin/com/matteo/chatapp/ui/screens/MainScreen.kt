@@ -80,7 +80,18 @@ fun MainScreen(
     val isLoadingOlder = conversationState.isLoadingOlder
     val messageError = conversationState.error
     val isUploadingAttachment = conversationState.isUploadingAttachment
-    var imageToView by remember { mutableStateOf<com.matteo.chatapp.model.Message?>(null) }
+    val imageGallery by chatViewModel.imageGallery.collectAsStateWithLifecycle()
+    val imageToView = imageGallery.anchor
+    var forwardSource by remember { mutableStateOf<com.matteo.chatapp.model.Message?>(null) }
+    var forwarding by remember { mutableStateOf(false) }
+    var forwardError by remember { mutableStateOf<String?>(null) }
+    val forwardSnackbar = remember { SnackbarHostState() }
+    val openForward: (com.matteo.chatapp.model.Message) -> Unit = {
+        forwardSource = it
+        forwardError = null
+        serverViewModel.loadAllChannelsForSearch()
+    }
+    var mediaNoticeId by remember { mutableStateOf<String?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     var savingAttachment by remember { mutableStateOf(false) }
     var mediaNotice by remember { mutableStateOf<String?>(null) }
@@ -90,6 +101,7 @@ fun MainScreen(
         if (!savingAttachment) {
             savingAttachment = true
             mediaNotice = null
+            mediaNoticeId = message.id
             mediaScope.launch {
                 try {
                     val fresh = chatViewModel.refreshAttachment(message)
@@ -105,6 +117,7 @@ fun MainScreen(
         if (!savingAttachment) {
             savingAttachment = true
             mediaNotice = null
+            mediaNoticeId = message.id
             mediaScope.launch {
                 try {
                     val fresh = chatViewModel.refreshAttachment(message)
@@ -214,16 +227,28 @@ fun MainScreen(
         }
     }
 
-    LaunchedEffect(messages.size, conversationState.pendingMessages.size) {
-        val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        val totalItems = listState.layoutInfo.totalItemsCount
-        val isNearBottom = totalItems == 0 || lastVisibleIndex >= totalItems - 4
+    val scrollDensity = androidx.compose.ui.platform.LocalDensity.current
+    var wasNearConversationEnd by remember(activeChatKey) { mutableStateOf(true) }
+    LaunchedEffect(listState, activeChatKey, scrollDensity) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+            listState.isScrollInProgress to isNearConversationEnd(last?.index, layout.totalItemsCount,
+                last?.let { it.offset + it.size } ?: 0, layout.viewportEndOffset,
+                with(scrollDensity) { 80.dp.toPx() })
+        }.collect { (scrolling, nearEnd) ->
+            // A new item changing the layout must not overwrite the user's previous position.
+            if (scrolling) wasNearConversationEnd = nearEnd
+        }
+    }
+    LaunchedEffect(activeChatKey, messages.lastOrNull()?.id, conversationState.pendingMessages.lastOrNull()?.id, forceScrollChatKey) {
         val shouldForceScroll = activeChatKey != null && forceScrollChatKey == activeChatKey
         if ((messages.isNotEmpty() || conversationState.pendingMessages.isNotEmpty()) &&
-            (shouldForceScroll || isNearBottom || conversationState.pendingMessages.any { it.status == com.matteo.chatapp.viewmodel.SendStatus.SENDING })) {
+            (shouldForceScroll || (wasNearConversationEnd && !listState.isScrollInProgress))) {
             val dateSeparatorCount = messages.mapNotNull { it.createdAt?.take(10) }.distinct().size
             val targetIndex = (messages.size + dateSeparatorCount + conversationState.pendingMessages.size - 1).coerceAtLeast(0)
             listState.animateScrollToItem(targetIndex)
+            wasNearConversationEnd = true
             if (shouldForceScroll) forceScrollChatKey = null
         }
     }
@@ -291,8 +316,9 @@ fun MainScreen(
         onBack: (() -> Unit)? = null,
         onProfileClick: (() -> Unit)? = null
     ) = ChatAreaActions(
-        onOpenImage = { imageToView = it },
+        onOpenImage = chatViewModel::openImageGallery,
         onDownload = downloadMedia,
+        onForward = openForward,
         onSendLocation = { onSendText(it, null, {}) },
         onLoadOlder = chatViewModel::loadOlderMessages,
         onRetryMessage = chatViewModel::retryMessage,
@@ -312,6 +338,7 @@ fun MainScreen(
             val chatKey = activeChatKey
             chatViewModel.sendPhotos(files, comment, reply) { queued ->
                 if (queued && latestActiveChatKey == chatKey) {
+                    forceScrollChatKey = activeChatKey
                     if (messageInput == draft) updateDraft("")
                     if (replyingTo?.id == reply) replyingTo = null
                 }
@@ -324,6 +351,7 @@ fun MainScreen(
             chatViewModel.sendAttachment(file, content, reply) {
                 if (messageInput == content) updateDraft("")
                 if (replyingTo?.id == reply) replyingTo = null
+                forceScrollChatKey = activeChatKey
                 clearSelection()
             }
         },
@@ -332,6 +360,7 @@ fun MainScreen(
             if (content.isNotBlank()) {
                 val reply = replyingTo?.id
                 onSendText(content, reply) {
+                    forceScrollChatKey = activeChatKey
                     if (messageInput == content) updateDraft("")
                     if (replyingTo?.id == reply) replyingTo = null
                 }
@@ -454,7 +483,9 @@ fun MainScreen(
                                 forceScrollChatKey = "dm:${dm.id}"
                                 chatViewModel.loadDmMessages(dm.id)
                             },
-                            viewModel = friendViewModel
+                            viewModel = friendViewModel,
+                            conversations = dms,
+                            onPreferences = { dm, value -> chatViewModel.updateDmPreferences(dm.id, value) }
                         )
                     }
                     mobileSection == MobileSection.MESSAGES -> Column(Modifier.fillMaxSize()) {
@@ -480,6 +511,7 @@ fun MainScreen(
                                         dm = dm,
                                         selected = false,
                                         hasUnread = unreadDmIds.contains(dm.id),
+                                        onProfile = { friendViewModel.loadUserProfile(dm.otherUserId) },
                                         onPreferences = { chatViewModel.updateDmPreferences(dm.id, it) },
                                         onClick = {
                                             friendViewModel.selectDm(dm)
@@ -677,7 +709,8 @@ fun MainScreen(
                                 dm = dm,
                                 selected = selectedDm?.id == dm.id,
                                 hasUnread = unreadDmIds.contains(dm.id),
-                                onPreferences = { chatViewModel.updateDmPreferences(dm.id, it) },
+                                onProfile = { friendViewModel.loadUserProfile(dm.otherUserId) },
+                                        onPreferences = { chatViewModel.updateDmPreferences(dm.id, it) },
                                 onClick = {
                                     friendViewModel.selectDm(dm)
                                     currentDestination = MainDestination.DirectMessage(dm)
@@ -742,7 +775,9 @@ fun MainScreen(
                             forceScrollChatKey = "dm:${dm.id}"
                             chatViewModel.loadDmMessages(dm.id)
                         },
-                        viewModel = friendViewModel
+                        viewModel = friendViewModel,
+                            conversations = dms,
+                            onPreferences = { dm, value -> chatViewModel.updateDmPreferences(dm.id, value) }
                     )
                 }
 
@@ -797,6 +832,7 @@ fun MainScreen(
     }
     }
 
+        SnackbarHost(forwardSnackbar, Modifier.align(Alignment.BottomCenter).padding(16.dp))
     }
 
     var showPasswordChanged by remember { mutableStateOf(false) }
@@ -1003,11 +1039,33 @@ fun MainScreen(
     sharedItems.dmId?.let { dmId ->
         SharedItemsDialog(sharedItems, onTab = { chatViewModel.openSharedItems(dmId, it) },
             onMore = chatViewModel::loadMoreSharedItems, onDismiss = chatViewModel::closeSharedItems,
-            onOpenImage = { imageToView = it }, onDownload = downloadMedia)
+            onOpenImage = chatViewModel::openImageGallery, onDownload = downloadMedia)
     }
     imageToView?.let { image -> com.matteo.chatapp.ui.components.ImageViewerDialog(image,
         refresh = chatViewModel::refreshAttachment, onDownload = downloadMedia, onShare = shareMedia,
-        onDismiss = { imageToView = null }, isWorking = savingAttachment, notice = mediaNotice) }
+        onDismiss = chatViewModel::closeImageGallery, isWorking = savingAttachment, notice = mediaNotice,
+        noticeMessageId = mediaNoticeId, images = imageGallery.images, hasMore = imageGallery.hasMore,
+        loadingMore = imageGallery.loading, galleryError = imageGallery.error, onMore = chatViewModel::loadMoreGalleryImages,
+        onForward = openForward) }
+    forwardSource?.let { source ->
+        val targets = forwardingTargets(source, dms.filter { dm -> friendState.blockedUsers.none { it.id == dm.otherUserId } },
+            allSearchChannels + channels, servers.associate { it.id to it.name })
+        ForwardMessageDialog(source, targets, forwarding, forwardError, onDismiss = { forwardSource = null },
+            onSend = { choice ->
+                forwarding = true
+                forwardError = null
+                chatViewModel.forwardMessage(source, choice.target) { error ->
+                    forwarding = false
+                    if (error != null) forwardError = error else {
+                        forwardSource = null
+                        if (imageToView != null) {
+                            mediaNoticeId = source.id
+                            mediaNotice = "Reenvío preparado para ${choice.name}"
+                        } else mediaScope.launch { forwardSnackbar.showSnackbar("Reenvío preparado para ${choice.name}") }
+                    }
+                }
+            })
+    }
     mediaError?.let { error -> AlertDialog(onDismissRequest = { mediaError = null }, title = { Text("No se pudo completar la acción") },
         text = { Text(error) }, confirmButton = { TextButton(onClick = { mediaError = null }) { Text("Aceptar") } }) }
 

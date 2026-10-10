@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -32,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -96,6 +99,7 @@ internal data class ChatAreaActions(
     val onBack: (() -> Unit)? = null,
     val onSearch: (() -> Unit)? = null,
     val onProfileClick: (() -> Unit)? = null,
+    val onForward: ((Message) -> Unit)? = null,
     val onOpenImage: (Message) -> Unit = {},
     val onDownload: (Message) -> Unit = {},
     val onSendLocation: (String) -> Unit = {}
@@ -135,6 +139,10 @@ internal fun ChatArea(
     val scope = rememberCoroutineScope()
     val density = androidx.compose.ui.platform.LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var composerFocused by remember(destinationKey) { mutableStateOf(false) }
+    val composerBorder by animateColorAsState(if (composerFocused) Primary else Primary.copy(alpha = 0.55f), tween(120))
     var pendingAttachment by remember(destinationKey) { mutableStateOf<PickedAttachmentFile?>(null) }
     var isRecordingVoice by remember(destinationKey) { mutableStateOf(false) }
     var recordingSeconds by remember(destinationKey) { mutableStateOf(0) }
@@ -172,6 +180,22 @@ internal fun ChatArea(
         error = photoError,
         onRemove = { index -> pendingPhotos = pendingPhotos.filterIndexed { i, _ -> i != index } },
         onRetake = { selectPhotos(true) },
+        onFlip = { index ->
+            val photo = pendingPhotos[index]
+            val target = destinationKey
+            photoWorking = true
+            photoError = null
+            scope.launch {
+                try {
+                    val flipped = com.matteo.chatapp.platform.flipCameraPhoto(photo)
+                    if (latestDestination == target && latestCanMessage) {
+                        pendingPhotos = pendingPhotos.map { if (it === photo) flipped else it }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { photoError = e.message ?: "No se pudo voltear la foto" }
+                finally { photoWorking = false }
+            }
+        },
         onDismiss = { pendingPhotos = emptyList(); photoError = null },
         onSend = { comment ->
             photoWorking = true
@@ -224,10 +248,10 @@ internal fun ChatArea(
                 if (firstVisible <= 2 && hasOlderMessages) onLoadOlder()
             }
     }
-    LaunchedEffect(imeBottom, destinationKey) {
-        if (imeBottom > 0 && messages.isNotEmpty()) {
+    LaunchedEffect(imeBottom > 0, destinationKey) {
+        if (imeBottom > 0 && messages.isNotEmpty() && !listState.canScrollForward && !listState.isScrollInProgress) {
             val dateSeparatorCount = messages.mapNotNull { it.createdAt?.take(10) }.distinct().size
-            val targetIndex = (messages.size + dateSeparatorCount - 1).coerceAtLeast(0)
+            val targetIndex = (messages.size + dateSeparatorCount + state.pendingMessages.size - 1).coerceAtLeast(0)
             listState.scrollToItem(targetIndex)
         }
     }
@@ -333,6 +357,7 @@ internal fun ChatArea(
                         onEdit = { content -> onEditMessage(message.id, content) },
                         onDelete = { onDeleteMessage(message.id) },
                         highlighted = message.id == highlightedMessageId,
+                        onForward = actions.onForward,
                         onOpenImage = actions.onOpenImage, onDownload = actions.onDownload,
                         allowEdit = state.canMessage
                     )
@@ -436,60 +461,31 @@ internal fun ChatArea(
             }
         }
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
-                .clip(RoundedCornerShape(20.dp)).background(Surface)
-                .border(1.dp, Outline, RoundedCornerShape(20.dp)).padding(6.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(24.dp)).background(Surface)
+                .border(1.dp, composerBorder, RoundedCornerShape(24.dp)).padding(4.dp)
         ) {
-            OutlinedTextField(
-                value = messageInput,
-                onValueChange = onInputChange,
-                enabled = state.canMessage && !isRecordingVoice,
-                placeholder = { Text("Escribe un mensaje", color = Muted) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onPreviewKeyEvent { event ->
-                        if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
-                            if (canSend) sendCurrent()
-                            true
-                        } else {
-                            false
-                        }
-                    },
-                shape = RoundedCornerShape(14.dp),
-                singleLine = false,
-                minLines = 1,
-                maxLines = 5,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (canSend) sendCurrent() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Primary.copy(alpha = 0.5f),
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedTextColor = OnBackground,
-                    unfocusedTextColor = OnBackground,
-                    cursorColor = Primary,
-                    focusedContainerColor = Surface,
-                    unfocusedContainerColor = Surface
-                )
-            )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             Box {
             IconButton(
-                onClick = { attachmentMenu = true },
+                onClick = { keyboard?.hide(); focusManager.clearFocus(); attachmentMenu = true },
                 enabled = state.canMessage && !isUploadingAttachment && !isRecordingVoice && !photoWorking,
                 modifier = Modifier.size(48.dp)
             ) {
                 Icon(Icons.Rounded.AttachFile, contentDescription = "Adjuntar archivo", tint = OnSurface)
             }
-            DropdownMenu(expanded = attachmentMenu, onDismissRequest = { attachmentMenu = false }) {
-                if (com.matteo.chatapp.platform.supportsPhotoCapture()) DropdownMenuItem(
-                    text = { Text("Cámara") }, leadingIcon = { Icon(Icons.Rounded.PhotoCamera, null, tint = Primary) },
-                    onClick = { attachmentMenu = false; selectPhotos(true) })
-                DropdownMenuItem(text = { Text("Galería") }, leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null, tint = Primary) },
-                    onClick = { attachmentMenu = false; selectPhotos(false) })
-                DropdownMenuItem(text = { Text("Archivo") }, leadingIcon = { Icon(Icons.Rounded.Description, null, tint = Primary) },
-                    onClick = {
-                        attachmentMenu = false
+            }
+            if (attachmentMenu) com.matteo.chatapp.ui.components.ActionSheet("Adjuntar", { attachmentMenu = false }) {
+                if (com.matteo.chatapp.platform.supportsPhotoCapture())
+                    com.matteo.chatapp.ui.components.ActionSheetItem("Cámara", Icons.Rounded.PhotoCamera) {
+                        attachmentMenu = false; selectPhotos(true)
+                    }
+                com.matteo.chatapp.ui.components.ActionSheetItem("Galería", Icons.Rounded.PhotoLibrary) {
+                    attachmentMenu = false; selectPhotos(false)
+                }
+                com.matteo.chatapp.ui.components.ActionSheetItem("Archivo", Icons.Rounded.Description) {
+                    attachmentMenu = false
                         val target = destinationKey
                         scope.launch {
                             try {
@@ -501,13 +497,42 @@ internal fun ChatArea(
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (e: Exception) { recordingError = e.message ?: "No se pudo abrir el archivo" }
                         }
-                    })
-                DropdownMenuItem(text = { Text("Ubicación") }, leadingIcon = { Icon(Icons.Rounded.LocationOn, null, tint = Primary) },
-                    onClick = { attachmentMenu = false; locationDialog = true })
+
+                }
+                com.matteo.chatapp.ui.components.ActionSheetItem("Ubicación", Icons.Rounded.LocationOn) {
+                    attachmentMenu = false; locationDialog = true
+                }
             }
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(
+            BasicTextField(
+                value = messageInput,
+                onValueChange = onInputChange,
+                enabled = state.canMessage && !isRecordingVoice,
+                modifier = Modifier
+                    .weight(1f).heightIn(min = 48.dp).padding(horizontal = 8.dp)
+                    .onFocusChanged { composerFocused = it.isFocused }
+                    .onPreviewKeyEvent { event ->
+                        if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
+                            if (canSend) sendCurrent()
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                singleLine = false,
+                minLines = 1,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (canSend) sendCurrent() }),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = OnBackground),
+                cursorBrush = SolidColor(Primary),
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxWidth().padding(vertical = 13.dp), contentAlignment = Alignment.CenterStart) {
+                        if (messageInput.isEmpty()) Text("Mensaje", color = Muted, style = MaterialTheme.typography.bodyLarge)
+                        inner()
+                    }
+                }
+            )
+            if (isRecordingVoice || (messageInput.isBlank() && pendingAttachment == null && !isUploadingAttachment)) IconButton(
                 onClick = {
                     scope.launch {
                         if (isRecordingVoice) {
@@ -543,7 +568,7 @@ internal fun ChatArea(
                     tint = if (isRecordingVoice) Color.White else OnSurface
                 )
             }
-            IconButton(
+            else IconButton(
                 onClick = sendCurrent,
                 enabled = canSend,
                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(sendColor)

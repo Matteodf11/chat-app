@@ -61,6 +61,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
+        jvmTest.dependencies {
+            runtimeOnly(compose.desktop.currentOs)
+        }
+
         val jvmMain by getting {
             dependencies {
                 implementation(libs.ktor.client.java)

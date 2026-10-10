@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -245,59 +246,54 @@ internal fun SidebarSectionLabel(text: String) {
 
 @Composable
 internal fun DirectMessageRow(dm: DmConversation, selected: Boolean, hasUnread: Boolean, onClick: () -> Unit,
+    onProfile: () -> Unit,
     onPreferences: (com.matteo.chatapp.model.DmPreferencesRequest) -> Unit = {}) {
     val background by animateColorAsState(if (selected) PrimarySoft else Color.Transparent, tween(140))
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(background)
-            .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        PresenceAvatar(name = dm.otherUsername, avatarUrl = dm.otherAvatar, online = dm.otherIsOnline, size = 40)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(dm.otherUsername, color = OnBackground, fontSize = 15.sp,
-                    modifier = Modifier.weight(1f, fill = false),
-                    fontWeight = if (selected || hasUnread) FontWeight.SemiBold else FontWeight.Medium,
+    var expanded by remember(dm.id) { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(background)
+                .combinedClickable(onClick = onClick, onLongClick = { expanded = true },
+                    onLongClickLabel = "Opciones de conversación")
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PresenceAvatar(name = dm.otherUsername, avatarUrl = dm.otherAvatar, online = dm.otherIsOnline, size = 40)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(dm.otherUsername, color = OnBackground, fontSize = 15.sp,
+                        modifier = Modifier.weight(1f, fill = false),
+                        fontWeight = if (selected || hasUnread) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (dm.pinned) Icon(Icons.Rounded.PushPin, "Conversación fijada", tint = Primary, modifier = Modifier.size(14.dp))
+                    if (dm.muted) Icon(Icons.Rounded.NotificationsOff, "Silenciada", tint = Muted, modifier = Modifier.size(14.dp))
+                }
+                Text(dm.lastMessagePreview ?: if (hasUnread) "Mensajes nuevos" else if (dm.otherIsOnline) "En línea" else "Desconectado",
+                    color = if (hasUnread) Primary else OnSurface, fontSize = 13.sp, lineHeight = 18.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (dm.pinned) Icon(Icons.Rounded.PushPin, "Conversación fijada", tint = Primary, modifier = Modifier.size(14.dp))
-                if (dm.muted) Icon(Icons.Rounded.NotificationsOff, "Silenciada", tint = Muted, modifier = Modifier.size(14.dp))
             }
-            Text(dm.lastMessagePreview ?: if (hasUnread) "Mensajes nuevos" else if (dm.otherIsOnline) "En línea" else "Desconectado",
-                color = if (hasUnread) Primary else OnSurface, fontSize = 13.sp, lineHeight = 18.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Spacer(Modifier.width(8.dp))
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        dm.lastMessageAt?.let { at -> Text(conversationTimeLabel(at), color = Muted, fontSize = 11.sp) }
-        if (hasUnread) {
-            Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Primary).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                Text(if (dm.unreadCount > 99) "99+" else dm.unreadCount.coerceAtLeast(1).toString(), color = OnPrimary, fontSize = 10.sp)
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            dm.lastMessageAt?.let { at -> Text(conversationTimeLabel(at), color = Muted, fontSize = 11.sp) }
+            if (hasUnread) {
+                Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Primary).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(if (dm.unreadCount > 99) "99+" else dm.unreadCount.coerceAtLeast(1).toString(), color = OnPrimary, fontSize = 10.sp)
+                }
             }
-        }
-        }
-        Box {
-            var expanded by remember { mutableStateOf(false) }
-            IconButton(onClick = { expanded = true }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Rounded.MoreVert, "Opciones de conversación", tint = Muted, modifier = Modifier.size(20.dp))
             }
-            DropdownMenu(expanded, onDismissRequest = { expanded = false }, containerColor = Surface) {
-                DropdownMenuItem(text = { Text(if (dm.pinned) "Desfijar" else "Fijar conversación") }, onClick = {
-                    expanded = false; onPreferences(com.matteo.chatapp.model.DmPreferencesRequest(pinned = !dm.pinned))
-                })
-                DropdownMenuItem(text = { Text(if (dm.muted) "Activar notificaciones" else "Silenciar") }, onClick = {
-                    expanded = false; onPreferences(com.matteo.chatapp.model.DmPreferencesRequest(muted = !dm.muted))
-                })
-                DropdownMenuItem(text = { Text(if (dm.archived) "Desarchivar" else "Archivar") }, onClick = {
-                    expanded = false; onPreferences(com.matteo.chatapp.model.DmPreferencesRequest(archived = !dm.archived))
-                })
+            Box {
+                IconButton(onClick = { expanded = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Rounded.MoreVert, "Opciones de conversación", tint = Muted, modifier = Modifier.size(20.dp))
+                }
+
             }
         }
+        ConversationMenu(expanded, { expanded = false }, dm, onClick, onProfile, onPreferences)
     }
 }
 

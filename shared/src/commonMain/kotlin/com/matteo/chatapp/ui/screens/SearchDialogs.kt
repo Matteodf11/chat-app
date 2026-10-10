@@ -1,5 +1,15 @@
 package com.matteo.chatapp.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.DialogProperties
+import com.matteo.chatapp.ui.components.AvatarImage
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -129,6 +139,10 @@ internal fun MessageSearchDialog(
     var to by remember { mutableStateOf("") }
     var attachmentsOnly by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
+    var showFilters by remember { mutableStateOf(false) }
+    var submitted by remember { mutableStateOf(false) }
+    val filterCount = listOf(sender, from, to).count { it.isNotBlank() }
+
     val canSearch = query.isNotBlank() || sender.isNotBlank() || from.isNotBlank() || to.isNotBlank() || attachmentsOnly
     val submitSearch = {
         if (!isValidSearchDate(from) || !isValidSearchDate(to)) {
@@ -137,82 +151,101 @@ internal fun MessageSearchDialog(
             localError = "La fecha inicial no puede ser posterior a la final"
         } else {
             localError = null
+            submitted = true
             onSearch(query, sender, from, to, attachmentsOnly)
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).heightIn(max = 720.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = Surface
-        ) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.widthIn(max = 720.dp).fillMaxWidth().heightIn(max = 720.dp).padding(12.dp).imePadding(),
+            shape = RoundedCornerShape(24.dp), color = Surface) {
             Column(Modifier.fillMaxWidth().padding(18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Buscar mensajes", color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "Cerrar", tint = Muted) }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Buscar mensajes", color = OnBackground, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Encuentra algo en esta conversación", color = Muted, fontSize = 12.sp)
+                    }
+                    IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Cerrar búsqueda", tint = Muted) }
                 }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it.take(120) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    placeholder = { Text("Texto o nombre de archivo") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        if (canSearch) submitSearch()
-                    }),
-                    colors = searchFieldColors()
-                )
-                Spacer(Modifier.height(10.dp))
-                SearchFilterField(sender, { sender = it.take(80) }, "Autor", Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SearchFilterField(from, { from = it.take(10) }, "Desde", Modifier.weight(1f), "2026-07-01")
-                    SearchFilterField(to, { to = it.take(10) }, "Hasta", Modifier.weight(1f), "2026-07-31")
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilterChip(
-                        selected = attachmentsOnly,
-                        onClick = { attachmentsOnly = !attachmentsOnly },
-                        label = { Text("Solo archivos") }
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Button(
-                        onClick = submitSearch,
-                        enabled = canSearch && !isSearching,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("Buscar")
+                Spacer(Modifier.height(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(query, { query = it.take(120) }, Modifier.weight(1f),
+                        singleLine = true, placeholder = { Text("Texto o archivo") },
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = { Icon(Icons.Rounded.Search, null, tint = Muted) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { if (canSearch && !isSearching) submitSearch() }),
+                        colors = searchFieldColors())
+                    FilledIconButton(onClick = submitSearch, enabled = canSearch && !isSearching,
+                        modifier = Modifier.size(48.dp), shape = RoundedCornerShape(16.dp)) {
+                        Icon(Icons.Rounded.Search, "Buscar mensajes")
                     }
                 }
-                val visibleError = localError ?: error
-                if (visibleError != null) {
-                    Text(visibleError, color = Error, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(selected = showFilters || filterCount > 0, onClick = { showFilters = !showFilters },
+                        leadingIcon = { Icon(Icons.Rounded.Tune, null, Modifier.size(16.dp)) },
+                        label = { Text(if (filterCount > 0) "Filtros · $filterCount" else "Filtros") })
+                    FilterChip(selected = attachmentsOnly, onClick = { attachmentsOnly = !attachmentsOnly },
+                        leadingIcon = { Icon(Icons.Rounded.AttachFile, null, Modifier.size(16.dp)) },
+                        label = { Text("Solo archivos") })
+                    if (filterCount > 0 || attachmentsOnly) TextButton(onClick = {
+                        sender = ""; from = ""; to = ""; attachmentsOnly = false; localError = null
+                    }) { Text("Limpiar filtros") }
                 }
-                Spacer(Modifier.height(10.dp))
-                when {
-                    isSearching -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Primary)
-                    }
-                    results.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        Text("Sin resultados", color = Muted, fontSize = 13.sp)
-                    }
-                    else -> LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(results, key = { it.id }) { message ->
-                            val preview = message.content.ifBlank {
-                                if (message.attachmentContentType?.startsWith("audio/") == true) "Nota de voz"
-                                else message.attachmentName ?: "Archivo adjunto"
+                if (isSearching) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Primary)
+                HorizontalDivider(color = Outline)
+                LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 180.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 14.dp)) {
+                    item(key = "filters") {
+                        AnimatedVisibility(showFilters) {
+                            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                                .border(1.dp, Outline, RoundedCornerShape(16.dp)).padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Afinar búsqueda", color = OnBackground, style = MaterialTheme.typography.labelLarge)
+                                SearchFilterField(sender, { sender = it.take(80); localError = null }, "Autor", Modifier.fillMaxWidth())
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    SearchFilterField(from, { from = it.take(10); localError = null }, "Desde", Modifier.weight(1f), "AAAA-MM-DD")
+                                    SearchFilterField(to, { to = it.take(10); localError = null }, "Hasta", Modifier.weight(1f), "AAAA-MM-DD")
+                                }
                             }
-                            SearchResultRow(
-                                Icons.Rounded.ChatBubbleOutline,
-                                message.senderUsername,
-                                "${message.createdAt?.replace('T', ' ')?.take(16).orEmpty()}  $preview"
-                            ) { onOpenResult(message.id) }
+                        }
+                    }
+                    (localError ?: error)?.let { message -> item { Text(message, color = Error, style = MaterialTheme.typography.bodySmall) } }
+                    if (results.isEmpty() && !isSearching && localError == null && error == null) item {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Rounded.Search, null, tint = Muted, modifier = Modifier.size(30.dp))
+                            Text(if (submitted) "No encontramos mensajes" else "¿Qué quieres encontrar?",
+                                color = OnBackground, fontWeight = FontWeight.Medium)
+                            Text(if (submitted) "Prueba con otras palabras o ajusta los filtros." else "Busca un texto, un archivo o filtra por autor.",
+                                color = Muted, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                    }
+                    if (results.isNotEmpty()) item {
+                        Text(if (isSearching) "Buscando…" else "${results.size} resultados", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    }
+                    items(results, key = { it.id }) { message ->
+                        Surface(color = SurfaceVariant, shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(enabled = !isSearching) { onOpenResult(message.id) }) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    AvatarImage(message.senderAvatar, message.senderUsername, 30)
+                                    Column(Modifier.weight(1f)) {
+                                        Text(message.senderUsername, color = OnBackground, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text(message.createdAt?.replace('T', ' ')?.take(16).orEmpty(), color = Muted, fontSize = 11.sp)
+                                    }
+                                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, "Abrir mensaje", tint = Muted, modifier = Modifier.size(18.dp))
+                                }
+                                if (message.content.isNotBlank()) Text(message.content, color = OnSurface, fontSize = 14.sp,
+                                    lineHeight = 20.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                message.attachmentName?.let { name ->
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(Icons.Rounded.Description, null, tint = Primary, modifier = Modifier.size(16.dp))
+                                        Text(name, color = Primary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -5,6 +5,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,7 +34,9 @@ import com.matteo.chatapp.viewmodel.FriendViewModel
 @Composable
 fun FriendsScreen(
     onOpenDm: (DmConversation) -> Unit,
-    viewModel: FriendViewModel
+    viewModel: FriendViewModel,
+    conversations: List<DmConversation> = emptyList(),
+    onPreferences: (DmConversation, com.matteo.chatapp.model.DmPreferencesRequest) -> Unit = { _, _ -> }
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val friends = state.friends
@@ -87,11 +91,17 @@ fun FriendsScreen(
             0 -> FriendsList(
                 friends = friends.filter { it.friendIsOnline },
                 emptyText = "No hay amigos conectados",
+                conversations = conversations,
+                onProfile = { viewModel.loadUserProfile(it.friendId) },
+                onPreferences = onPreferences,
                 onOpenDm = { viewModel.openDm(it.friendId, onOpenDm) }
             )
             1 -> FriendsList(
                 friends = friends,
                 emptyText = "Aun no tienes amigos",
+                conversations = conversations,
+                onProfile = { viewModel.loadUserProfile(it.friendId) },
+                onPreferences = onPreferences,
                 onOpenDm = { viewModel.openDm(it.friendId, onOpenDm) }
             )
             2 -> PendingList(
@@ -126,7 +136,10 @@ fun FriendsScreen(
 fun FriendsList(
     friends: List<FriendRequest>,
     emptyText: String,
-    onOpenDm: (FriendRequest) -> Unit
+    onOpenDm: (FriendRequest) -> Unit,
+    conversations: List<DmConversation> = emptyList(),
+    onProfile: (FriendRequest) -> Unit = {},
+    onPreferences: (DmConversation, com.matteo.chatapp.model.DmPreferencesRequest) -> Unit = { _, _ -> }
 ) {
     if (friends.isEmpty()) {
         EmptyFriendsState(emptyText)
@@ -140,7 +153,10 @@ fun FriendsList(
                 avatarUrl = friend.friendAvatar,
                 description = if (friend.friendIsOnline) "En linea" else "Desconectado",
                 online = friend.friendIsOnline,
-                onOpenDm = { onOpenDm(friend) }
+                onOpenDm = { onOpenDm(friend) },
+                dm = conversations.firstOrNull { it.otherUserId == friend.friendId },
+                onProfile = { onProfile(friend) },
+                onPreferences = { value -> conversations.firstOrNull { it.otherUserId == friend.friendId }?.let { onPreferences(it, value) } }
             )
         }
     }
@@ -269,23 +285,35 @@ private fun FriendRow(
     avatarUrl: String?,
     description: String,
     online: Boolean,
-    onOpenDm: () -> Unit
+    onOpenDm: () -> Unit,
+    dm: DmConversation?,
+    onProfile: () -> Unit,
+    onPreferences: (com.matteo.chatapp.model.DmPreferencesRequest) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Surface)
-            .clickable(onClickLabel = "Abrir chat con $name", role = androidx.compose.ui.semantics.Role.Button, onClick = onOpenDm)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        PresenceAvatar(name = name, avatarUrl = avatarUrl, online = online, size = 42)
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(name, color = OnBackground, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            Text(description, color = if (online) Accent else Muted, fontSize = 12.sp)
+    var expanded by remember(name) { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Surface)
+                .combinedClickable(onClickLabel = "Abrir chat con $name", role = androidx.compose.ui.semantics.Role.Button,
+                    onClick = onOpenDm, onLongClickLabel = "Opciones de $name", onLongClick = { expanded = true })
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PresenceAvatar(name = name, avatarUrl = avatarUrl, online = online, size = 42)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(name, color = OnBackground, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(description, color = if (online) Accent else Muted, fontSize = 12.sp)
+            }
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Rounded.MoreVert, "Opciones de $name", tint = Muted)
+            }
         }
+        ConversationMenu(expanded, { expanded = false }, dm, onOpenDm, onProfile, onPreferences,
+            title = name, avatarUrl = avatarUrl)
     }
 }
 

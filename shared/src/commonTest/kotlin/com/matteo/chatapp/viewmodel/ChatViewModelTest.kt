@@ -450,13 +450,117 @@ class ChatViewModelTest {
         } finally { vm.disconnectRealtime() }
     }
 
+    @Test
+    fun forwardingRefreshesSourceAndPersistsNewIdentifierBeforeSendingToChosenChat() = runViewModelTest {
+        val repository = ChatTestRepository()
+        val source = chatMessage("source", dmId = "source-chat", content = "Antiguo").copy(replyToId = "private-reply")
+        repository.refreshHandler = { source.copy(content = "Actualizado", attachmentName = "foto.jpg",
+            attachmentContentType = "image/jpeg", attachmentUrl = "fresh-signed-url") }
+        val save = CompletableDeferred<Unit>()
+        var stored: PendingMessage? = null
+        var downloads = 0
+        var results = 0
+        val store = object : com.matteo.chatapp.repository.ChatLocalStore {
+            override suspend fun put(message: PendingMessage) { save.await(); stored = message }
+        }
+        val vm = createViewModel(repository, localStore = store, downloader = {
+            assertEquals("fresh-signed-url", it.attachmentUrl)
+            downloads++
+            PickedAttachmentFile("foto.jpg", "image/jpeg", byteArrayOf(1, 2))
+        })
+        val target = ConversationTarget.DirectMessage("recipient")
+        try {
+            vm.loadDmMessages("another-open-chat")
+            advanceUntilIdle()
+            vm.forwardMessage(source, target) { assertEquals(null, it); results++ }
+            vm.forwardMessage(source, target) { error("Duplicate click must not enqueue again") }
+            advanceUntilIdle()
+            assertEquals(1, downloads)
+            assertEquals(0, results)
+            assertEquals(null, repository.lastAttachmentTarget)
+            save.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(1, results)
+            assertEquals(target, stored?.target)
+            assertEquals("Actualizado", stored?.content)
+            assertEquals(null, stored?.replyToId)
+            assertTrue(stored!!.id != source.id)
+            assertEquals(target, repository.lastAttachmentTarget)
+        } finally { vm.disconnectRealtime() }
+    }
+
+    @Test
+    fun inaccessibleSourceIsNeverDownloadedOrForwarded() = runViewModelTest {
+        val repository = ChatTestRepository()
+        repository.refreshHandler = { error("No tienes acceso al mensaje") }
+        val vm = createViewModel(repository, downloader = { error("Must not download inaccessible media") })
+        var error: String? = null
+        try {
+            vm.forwardMessage(chatMessage("source", dmId = "old"), ConversationTarget.DirectMessage("new")) { error = it }
+            advanceUntilIdle()
+            assertEquals("No tienes acceso al mensaje", error)
+            assertEquals(null, repository.lastAttachmentTarget)
+            assertEquals(null, repository.lastSentTarget)
+        } finally { vm.disconnectRealtime() }
+    }
+
+    @Test
+    fun forwardingDiskFailureDoesNotUploadAndAllowsRetry() = runViewModelTest {
+        val repository = ChatTestRepository()
+        repository.refreshHandler = { chatMessage(it, dmId = "old", content = "Texto") }
+        val vm = createViewModel(repository, localStore = object : com.matteo.chatapp.repository.ChatLocalStore {
+            override suspend fun put(message: PendingMessage) { error("disk full") }
+        })
+        var failures = 0
+        try {
+            repeat(2) {
+                vm.forwardMessage(chatMessage("source", dmId = "old"), ConversationTarget.DirectMessage("new")) {
+                    assertTrue(it != null); failures++
+                }
+                advanceUntilIdle()
+            }
+            assertEquals(2, failures)
+            assertEquals(null, repository.lastSentTarget)
+        } finally { vm.disconnectRealtime() }
+    }
+
+    @Test
+    fun imageGallerySkipsNonImagesPaginatesAndKeepsOtherChatsOut() = runViewModelTest {
+        val repository = ChatTestRepository()
+        val anchor = chatMessage("image-new", dmId = "gallery").copy(attachmentContentType = "image/jpeg", createdAt = "2026-10-10")
+        val old = anchor.copy(id = "image-old", createdAt = "2026-10-09")
+        val cursors = mutableListOf<String?>()
+        repository.sharedHandler = { dm, kind, cursor ->
+            assertEquals("gallery", dm); assertEquals("media", kind); cursors += cursor
+            when (cursor) {
+                null -> com.matteo.chatapp.model.SharedItemsPage(listOf(anchor), true, "one")
+                "one" -> com.matteo.chatapp.model.SharedItemsPage(listOf(anchor.copy(id = "voice", attachmentContentType = "audio/mp4")), true, "two")
+                else -> com.matteo.chatapp.model.SharedItemsPage(listOf(old, old.copy(id = "foreign", dmId = "other")), false)
+            }
+        }
+        val vm = createViewModel(repository)
+        try {
+            vm.openImageGallery(anchor)
+            advanceUntilIdle()
+            assertEquals(listOf("image-new"), vm.imageGallery.value.images.map { it.id })
+            vm.loadMoreGalleryImages()
+            advanceUntilIdle()
+            assertEquals(listOf(null, "one", "two"), cursors)
+            assertEquals(listOf("image-old", "image-new"), vm.imageGallery.value.images.map { it.id })
+            assertFalse(vm.imageGallery.value.hasMore)
+            vm.closeImageGallery()
+            assertTrue(vm.imageGallery.value.images.isEmpty())
+        } finally { vm.disconnectRealtime() }
+    }
+
     private fun createViewModel(
         repository: ChatTestRepository,
         personalMessagesSource: ChatTestPersonalMessagesSource =
             ChatTestPersonalMessagesSource(),
         notifications: MessageNotificationSink = MessageNotificationSink { },
         conversationSource: ChatTestConversationEventsSource = ChatTestConversationEventsSource(),
-        localStore: com.matteo.chatapp.repository.ChatLocalStore = object : com.matteo.chatapp.repository.ChatLocalStore {}
+        localStore: com.matteo.chatapp.repository.ChatLocalStore = object : com.matteo.chatapp.repository.ChatLocalStore {},
+        downloader: suspend (Message) -> PickedAttachmentFile = { error("No download expected") }
     ) = ChatViewModel(
         chatRepository = repository,
         accessTokenProvider = ChatTestAccessTokenProvider,
@@ -466,7 +570,8 @@ class ChatViewModelTest {
         personalMessagesSource = personalMessagesSource,
         inboxEventsSource = ChatTestInboxEventsSource(),
         notifications = notifications,
-        localStore = localStore
+        localStore = localStore,
+        attachmentDownloader = downloader
     )
 
     private fun runViewModelTest(
@@ -494,6 +599,11 @@ private object ChatTestIdentityProvider : SessionIdentityProvider {
 private class ChatTestRepository(
     private val pages: MutableMap<ConversationTarget, MessagePage> = mutableMapOf()
 ) : ChatRepository {
+    var refreshHandler: (suspend (String) -> Message)? = null
+    override suspend fun refreshMessage(id: String): Message = refreshHandler?.invoke(id) ?: error("No refresh expected")
+    var sharedHandler: (suspend (String, String, String?) -> com.matteo.chatapp.model.SharedItemsPage)? = null
+    override suspend fun sharedItems(dmId: String, kind: String, before: String?) =
+        sharedHandler?.invoke(dmId, kind, before) ?: error("No gallery expected")
     val readThrough = mutableListOf<Pair<String, String>>()
     override suspend fun markDmReadThrough(dmId: String, messageId: String) { readThrough += dmId to messageId }
     var sendHandler: (suspend (ConversationTarget, String, String?) -> Message)? = null

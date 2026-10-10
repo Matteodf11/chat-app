@@ -13,6 +13,20 @@ expect suspend fun pickPhotoAttachment(): PickedAttachmentFile?
 expect suspend fun pickPhotoAttachments(): List<PickedAttachmentFile>
 expect fun supportsPhotoCapture(): Boolean
 expect suspend fun capturePhoto(): PickedAttachmentFile?
+expect suspend fun flipCameraPhoto(file: PickedAttachmentFile): PickedAttachmentFile
+
+/** Mirror the displayed image horizontally, including portraits with rotated pixels. */
+internal fun horizontallyFlippedOrientation(orientation: Int): Int = when (orientation) {
+    1 -> 2
+    2 -> 1
+    3 -> 4
+    4 -> 3
+    5 -> 6
+    6 -> 5
+    7 -> 8
+    8 -> 7
+    else -> 2
+}
 
 const val MAX_SELECTED_PHOTOS = 10
 const val MAX_PHOTO_SELECTION_BYTES = 50L * 1024 * 1024
@@ -23,6 +37,8 @@ fun validatePhotoSelection(files: List<PickedAttachmentFile>) {
     }
     require(files.sumOf { it.size } <= MAX_PHOTO_SELECTION_BYTES) { "Las fotos seleccionadas superan 50 MB" }
 }
+
+expect suspend fun downloadAttachmentFile(url: String, fileName: String, contentType: String): PickedAttachmentFile
 
 expect suspend fun saveAttachment(url: String, fileName: String): Boolean
 expect fun imageShareActionLabel(): String

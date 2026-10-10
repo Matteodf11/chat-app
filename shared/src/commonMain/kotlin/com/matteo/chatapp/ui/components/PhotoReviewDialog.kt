@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -28,7 +29,7 @@ import com.matteo.chatapp.platform.PickedAttachmentFile
 @Composable
 internal fun PhotoReviewDialog(
     files: List<PickedAttachmentFile>, initialComment: String, camera: Boolean, working: Boolean, error: String?,
-    onRemove: (Int) -> Unit, onRetake: () -> Unit, onSend: (String) -> Unit, onDismiss: () -> Unit
+    onRemove: (Int) -> Unit, onRetake: () -> Unit, onFlip: (Int) -> Unit, onSend: (String) -> Unit, onDismiss: () -> Unit
 ) {
     var selected by remember { mutableStateOf(0) }
     var comment by remember { mutableStateOf(initialComment) }
@@ -49,12 +50,15 @@ internal fun PhotoReviewDialog(
                             .clickable(enabled = !working) { selected = item })
                     }
                 }
-                Row {
-                    if (camera) TextButton(enabled = !working, onClick = onRetake) {
-                        Icon(Icons.Rounded.PhotoCamera, null); Spacer(Modifier.width(6.dp)); Text("Repetir")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    if (camera) TextButton(enabled = !working, contentPadding = PaddingValues(horizontal = 8.dp), onClick = onRetake) {
+                        Icon(Icons.Rounded.PhotoCamera, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Repetir")
                     }
-                    TextButton(enabled = !working, onClick = { onRemove(index) }) {
-                        Icon(Icons.Rounded.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("Quitar")
+                    if (camera) TextButton(enabled = !working, contentPadding = PaddingValues(horizontal = 8.dp), onClick = { onFlip(index) }) {
+                        Icon(Icons.Rounded.Flip, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Voltear")
+                    }
+                    TextButton(enabled = !working, contentPadding = PaddingValues(horizontal = 8.dp), onClick = { onRemove(index) }) {
+                        Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Quitar")
                     }
                 }
                 OutlinedTextField(comment, { comment = it.take(4000) }, enabled = !working,

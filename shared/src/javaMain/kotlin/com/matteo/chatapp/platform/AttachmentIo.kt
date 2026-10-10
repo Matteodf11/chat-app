@@ -52,3 +52,9 @@ internal suspend fun prepareSharedImage(url: String, name: String, directory: Fi
         return file
     } catch (e: Exception) { file.delete(); throw e }
 }
+
+actual suspend fun downloadAttachmentFile(url: String, fileName: String, contentType: String): PickedAttachmentFile =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        PickedAttachmentFile(attachmentSaveName(fileName), contentType, downloadAttachmentBytes(url))
+            .also { require(it.bytes.isNotEmpty()) { "El archivo está vacío" } }
+    }
