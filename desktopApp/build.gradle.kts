@@ -22,7 +22,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Chimera"
-            packageVersion = "1.1.1"
+            packageVersion = "1.1.2"
             description = "Chimera - Mensajes, amigos y comunidades"
             vendor = "Chimera"
             modules("java.instrument", "java.management", "java.net.http", "java.prefs", "jdk.crypto.ec", "jdk.unsupported")

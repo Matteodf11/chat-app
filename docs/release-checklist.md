@@ -1,24 +1,25 @@
-# Candidato de demostración 1.1.1
+# Candidato de demostración 1.1.2
 
 La versión tiene funciones implementadas y paquetes locales. No se declara
 cerrada hasta completar las comprobaciones manuales pendientes.
 
 | Comprobación | Estado y evidencia |
 | --- | --- |
-| Pruebas del cliente | 104 pruebas pasan en el último recorrido local |
+| Pruebas del cliente | 112 pruebas pasan en el último recorrido local |
 | Pruebas del backend | 57 pruebas pasan localmente; comprobaciones remotas correctas en a478f34 |
-| APK debug y MSI | Compilación local correcta de 1.1.1 |
+| APK debug y MSI | Compilación local correcta de 1.1.2 |
 | Captura básica con webcam en PC | Confirmada por el usuario |
 | Menciones por clic/Tab y contadores combinados | Implementados; clic y contadores confirmados durante las iteraciones |
 | Ubicación automática en Windows | Implementada y cubierta con proveedor falso; prueba real pendiente |
 | Cancelar, cambiar webcam y desconexión de hardware | Casos de sesión probados con cámaras falsas; prueba real pendiente |
 | Instalar en un equipo sin Java | Pendiente |
-| Actualizar el MSI anterior a 1.1.1 | Pendiente |
+| Actualizar el MSI anterior a 1.1.2 | Pendiente |
 | Enviar/recibir texto, fotos y voz Android ↔ Windows | Pendiente de recorrido final documentado con dos cuentas |
+| Audio bajo demanda y cierre al salir del chat | Ocho pruebas de escritorio con proveedor falso; reproducción con dispositivos reales pendiente |
 | Cortar/restaurar red y reintentar sin duplicados | Pruebas automáticas; recorrido final con dispositivos pendiente |
 | Recuperar borrador y cola pendiente tras reinicio | Pruebas automáticas; recorrido final con dispositivos pendiente |
 | Notificaciones, apertura del chat y cierre a bandeja | Pendiente de recorrido final con instalador |
-| GitHub Actions del cliente | Pruebas, APK, MSI y empaquetado correctos en [la ejecución de 1bf801d](https://github.com/Matteodf11/chat-app/actions/runs/38452367482) |
+| GitHub Actions del cliente | Ejecución de referencia 1.1.1: pruebas, APK, MSI y empaquetado correctos en [la ejecución de 1bf801d](https://github.com/Matteodf11/chat-app/actions/runs/38452367482) |
 | Capturas y vídeo reales para README/demo | Pendientes; no sustituir por maquetas |
 | Recuperación por correo | Aplazada por decisión del usuario hasta cerrar escritorio |
 

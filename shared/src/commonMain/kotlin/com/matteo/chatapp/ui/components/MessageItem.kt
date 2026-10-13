@@ -290,35 +290,45 @@ private fun AttachmentCard(message: Message, onOpenImage: (Message) -> Unit, onD
 private fun VoiceNoteCard(message: Message) {
     val controller = rememberVoicePlaybackController(message.attachmentUrl!!)
     val isPlaying by controller.isPlaying.collectAsState()
+    val isLoading by controller.isLoading.collectAsState()
+    val playbackError by controller.error.collectAsState()
     val progress by controller.progress.collectAsState()
     val duration by controller.durationSeconds.collectAsState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = 420.dp)
-            .background(SurfaceVariant, MaterialTheme.shapes.small)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(onClick = controller::playOrPause, modifier = Modifier.size(38.dp)) {
-            Icon(
-                if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = if (isPlaying) "Pausar nota de voz" else "Reproducir nota de voz",
-                tint = Primary
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 420.dp)
+                .background(SurfaceVariant, MaterialTheme.shapes.small)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = controller::playOrPause, enabled = !isLoading,
+                modifier = Modifier.size(38.dp).semantics {
+                    stateDescription = if (isLoading) "Cargando audio" else if (isPlaying) "Reproduciendo" else "Pausado"
+                }) {
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Primary, strokeWidth = 2.dp)
+                else Icon(
+                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (isPlaying) "Pausar nota de voz" else "Reproducir nota de voz",
+                    tint = Primary
+                )
+            }
+            Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = Muted, modifier = Modifier.size(20.dp))
+            Slider(
+                value = progress.coerceIn(0f, 1f),
+                onValueChange = controller::seekTo,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                enabled = duration > 0 && !isLoading,
+                colors = SliderDefaults.colors(thumbColor = Primary, activeTrackColor = Primary, inactiveTrackColor = Muted)
+            )
+            Text(
+                text = if (duration > 0) formatDuration((duration * progress).toInt()) + " / " + formatDuration(duration) else "Audio",
+                color = Muted,
+                fontSize = 10.sp
             )
         }
-        Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = Muted, modifier = Modifier.size(20.dp))
-        Slider(
-            value = progress.coerceIn(0f, 1f),
-            onValueChange = controller::seekTo,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-            colors = SliderDefaults.colors(thumbColor = Primary, activeTrackColor = Primary, inactiveTrackColor = Muted)
-        )
-        Text(
-            text = formatDuration(if (duration > 0) (duration * progress).toInt() else 0) + " / " + formatDuration(duration),
-            color = Muted,
-            fontSize = 10.sp
-        )
+        playbackError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
     }
 }
 

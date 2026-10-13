@@ -11,6 +11,11 @@ debug y el MSI no tiene firma digital. La captura básica de webcam ha sido
 confirmada por el usuario; la ubicación automática y la actualización del MSI
 siguen pendientes de comprobación manual.
 
+La versión 1.1.2 descarga las notas de voz al pulsar reproducir, permite reintentar
+si falla la carga y libera el audio al salir de la conversación. No se descarga
+el audio de todo el historial para mostrar sus controles. La duración se conoce
+al preparar la reproducción.
+
 - [Instalación y distribución de Windows](docs/desktop-distribution.md)
 - [Captura de cámara y comprobaciones manuales](docs/desktop-camera.md)
 - [Ubicación en Windows y Android](docs/location-sharing.md)
@@ -125,9 +130,9 @@ El APK debug se genera en:
 androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
-El MSI se genera en `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.1.msi`.
+El MSI se genera en `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.2.msi`.
 El script de empaquetado comprueba las versiones internas del APK y MSI y crea
-`build/release/Chimera-1.1.1-demo.zip`, con guía y sumas SHA-256. Estas sumas permiten
+`build/release/Chimera-1.1.2-demo.zip`, con guía y sumas SHA-256. Estas sumas permiten
 comprobar integridad; no sustituyen una firma digital. El empaquetado se ejecuta
 en Windows y necesita el Android SDK utilizado para compilar.
 El cliente se ejecuta también como JVM en macOS/Linux, pero la captura de webcam,
@@ -140,14 +145,14 @@ Windows. No se publica una aplicación para iPhone.
 .\gradlew.bat :shared:jvmTest
 ```
 
-Las 104 pruebas del recorrido local de 1.1.1 cubren estado, autenticación,
+Las 112 pruebas del recorrido local de 1.1.2 cubren estado, autenticación,
 reintentos, borradores, caché, menciones, entrada de ubicación, cierre del proceso
-de localización y ciclo de vida de cámara, entre otros casos. Los tests de
+de localización, ciclo de vida de cámara y reproducción de audio, entre otros casos. Los tests de
 hardware usan dobles: no certifican webcam, micrófono o localización reales.
 
 El workflow `Client checks` construye APK/MSI y guarda los informes y paquetes
-como artefactos de GitHub Actions durante 14 días. La ejecución remota está
-pendiente de subir estos cambios; no equivale a publicar una release permanente.
+como artefactos de GitHub Actions durante 14 días. El resultado de cada commit
+se consulta en Actions; no equivale a publicar una release permanente.
 
 ## Decisiones y límites
 

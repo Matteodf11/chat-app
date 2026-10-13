@@ -11,6 +11,8 @@ expect fun cancelVoiceRecording()
 
 interface VoicePlaybackController {
     val isPlaying: StateFlow<Boolean>
+    val isLoading: StateFlow<Boolean>
+    val error: StateFlow<String?>
     val progress: StateFlow<Float>
     val durationSeconds: StateFlow<Int>
     fun playOrPause()

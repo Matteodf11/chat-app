@@ -144,41 +144,62 @@ actual fun rememberVoicePlaybackController(url: String): VoicePlaybackController
     return controller
 }
 
-private class AndroidVoicePlaybackController(url: String) : VoicePlaybackController {
+private class AndroidVoicePlaybackController(private val url: String) : VoicePlaybackController {
     override val isPlaying = MutableStateFlow(false)
+    override val isLoading = MutableStateFlow(false)
+    override val error = MutableStateFlow<String?>(null)
     override val progress = MutableStateFlow(0f)
     override val durationSeconds = MutableStateFlow(0)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val player = MediaPlayer()
     private var prepared = false
+    private var released = false
     private var playWhenReady = false
     private var progressJob: Job? = null
 
     init {
-        player.setDataSource(url)
         player.setOnPreparedListener {
+            if (released) return@setOnPreparedListener
             prepared = true
+            isLoading.value = false
             durationSeconds.value = (player.duration / 1000).coerceAtLeast(0)
             if (playWhenReady) startPlayback()
         }
         player.setOnCompletionListener {
+            if (released) return@setOnCompletionListener
             isPlaying.value = false
             progress.value = 0f
             player.seekTo(0)
             progressJob?.cancel()
         }
-        player.prepareAsync()
+        player.setOnErrorListener { _, _, _ ->
+            if (!released) playbackFailed()
+            true
+        }
     }
 
     override fun playOrPause() {
+        if (released || isLoading.value) return
+        error.value = null
         if (!prepared) {
             playWhenReady = true
+            isLoading.value = true
+            try {
+                player.setDataSource(url)
+                player.prepareAsync()
+            } catch (_: Exception) {
+                playbackFailed()
+            }
             return
         }
         if (player.isPlaying) {
-            player.pause()
-            isPlaying.value = false
-            progressJob?.cancel()
+            try {
+                player.pause()
+                isPlaying.value = false
+                progressJob?.cancel()
+            } catch (_: Exception) {
+                playbackFailed()
+            }
         } else {
             startPlayback()
         }
@@ -186,7 +207,12 @@ private class AndroidVoicePlaybackController(url: String) : VoicePlaybackControl
 
     private fun startPlayback() {
         playWhenReady = false
-        player.start()
+        try {
+            player.start()
+        } catch (_: Exception) {
+            playbackFailed()
+            return
+        }
         isPlaying.value = true
         progressJob?.cancel()
         progressJob = scope.launch {
@@ -198,13 +224,34 @@ private class AndroidVoicePlaybackController(url: String) : VoicePlaybackControl
     }
 
     override fun seekTo(progress: Float) {
-        if (prepared && player.duration > 0) player.seekTo((player.duration * progress.coerceIn(0f, 1f)).toInt())
+        if (released || !prepared || !progress.isFinite()) return
+        try {
+            if (player.duration > 0) player.seekTo((player.duration * progress.coerceIn(0f, 1f)).toInt())
+        } catch (_: Exception) {
+            playbackFailed()
+        }
+    }
+
+    private fun playbackFailed() {
+        progressJob?.cancel()
+        runCatching { player.reset() }
+        prepared = false
+        playWhenReady = false
+        isPlaying.value = false
+        isLoading.value = false
+        progress.value = 0f
+        durationSeconds.value = 0
+        error.value = "No se pudo reproducir el audio. Pulsa para reintentar."
     }
 
     override fun release() {
+        if (released) return
+        released = true
         progressJob?.cancel()
         scope.coroutineContext[Job]?.cancel()
         runCatching { player.release() }
+        isPlaying.value = false
+        isLoading.value = false
     }
 }
 

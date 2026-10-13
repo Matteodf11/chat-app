@@ -1,4 +1,4 @@
-# Probar Chimera 1.1.1
+# Probar Chimera 1.1.2
 
 Chimera es un proyecto de portfolio de mensajería para Android y Windows. La demo
 utiliza el backend desplegado en Render y almacenamiento de Supabase. Requiere
@@ -7,8 +7,8 @@ conexión a Internet; el ordenador no necesita instalar Java para usar el MSI.
 ## Instalación
 
 1. Descomprime el paquete de demostración.
-2. En Windows instala `Chimera-1.1.1.msi` y abre Chimera desde Inicio.
-3. En Android instala `Chimera-1.1.1-debug.apk`, permitiendo la instalación desde
+2. En Windows instala `Chimera-1.1.2.msi` y abre Chimera desde Inicio.
+3. En Android instala `Chimera-1.1.2-debug.apk`, permitiendo la instalación desde
    la aplicación desde la que lo abras si Android lo solicita.
 4. Registra una cuenta de demostración y accede. Para probar mensajería entre
    dispositivos usa dos cuentas distintas, una en cada dispositivo.

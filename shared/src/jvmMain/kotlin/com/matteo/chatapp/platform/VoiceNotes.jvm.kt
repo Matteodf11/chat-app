@@ -3,21 +3,10 @@ package com.matteo.chatapp.platform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
-import java.net.URI
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
-import javax.sound.sampled.Clip
 import javax.sound.sampled.DataLine
-import javax.sound.sampled.LineEvent
 import javax.sound.sampled.TargetDataLine
 
 private object JvmVoiceRecorder {
@@ -95,83 +84,9 @@ actual fun cancelVoiceRecording() = JvmVoiceRecorder.cancel()
 
 @Composable
 actual fun rememberVoicePlaybackController(url: String): VoicePlaybackController {
-    val controller = remember(url) { JvmVoicePlaybackController(url) }
+    val controller = remember(url) { DesktopVoicePlaybackController(url) }
     DisposableEffect(controller) { onDispose { controller.release() } }
     return controller
-}
-
-private class JvmVoicePlaybackController(private val url: String) : VoicePlaybackController {
-    override val isPlaying = MutableStateFlow(false)
-    override val progress = MutableStateFlow(0f)
-    override val durationSeconds = MutableStateFlow(0)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var clip: Clip? = null
-    private var playWhenReady = false
-    private var progressJob: Job? = null
-
-    init {
-        scope.launch {
-            runCatching {
-                URI(url).toURL().openStream().buffered().use { input ->
-                    AudioSystem.getAudioInputStream(input).use { audio ->
-                        val loadedClip = AudioSystem.getClip()
-                        loadedClip.open(audio)
-                        loadedClip.addLineListener { event ->
-                            if (event.type == LineEvent.Type.STOP && loadedClip.microsecondPosition >= loadedClip.microsecondLength - 20_000) {
-                                isPlaying.value = false
-                                progress.value = 0f
-                                loadedClip.microsecondPosition = 0
-                            }
-                        }
-                        clip = loadedClip
-                        durationSeconds.value = (loadedClip.microsecondLength / 1_000_000L).toInt()
-                        if (playWhenReady) startPlayback()
-                    }
-                }
-            }
-        }
-    }
-
-    override fun playOrPause() {
-        val current = clip
-        if (current == null) {
-            playWhenReady = true
-            return
-        }
-        if (current.isRunning) {
-            current.stop()
-            isPlaying.value = false
-            progressJob?.cancel()
-        } else {
-            startPlayback()
-        }
-    }
-
-    private fun startPlayback() {
-        val current = clip ?: return
-        playWhenReady = false
-        current.start()
-        isPlaying.value = true
-        progressJob?.cancel()
-        progressJob = scope.launch {
-            while (isActive && current.isRunning) {
-                progress.value = if (current.microsecondLength > 0) {
-                    current.microsecondPosition.toFloat() / current.microsecondLength
-                } else 0f
-                delay(200)
-            }
-        }
-    }
-
-    override fun seekTo(progress: Float) {
-        clip?.let { it.microsecondPosition = (it.microsecondLength * progress.coerceIn(0f, 1f)).toLong() }
-    }
-
-    override fun release() {
-        progressJob?.cancel()
-        scope.coroutineContext[Job]?.cancel()
-        runCatching { clip?.close() }
-    }
 }
 
 private fun pcmToWav(pcm: ByteArray, sampleRate: Int): ByteArray {
