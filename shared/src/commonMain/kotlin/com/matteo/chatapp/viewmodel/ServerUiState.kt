@@ -14,6 +14,13 @@ data class ServerUiState(
     val selectedServer: Server? = null,
     val selectedChannel: Channel? = null,
     val isLoading: Boolean = false,
+    val isLoadingChannels: Boolean = false,
+    val isLoadingMembers: Boolean = false,
+    val isLoadingInvitations: Boolean = false,
+    val channelsError: String? = null,
+    val serversError: String? = null,
+    val action: String? = null,
+    val notice: String? = null,
     val error: String? = null
 )
 

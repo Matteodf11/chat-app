@@ -54,11 +54,11 @@ internal fun GeneralSettingsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(24.dp),
         tonalElevation = 0.dp,
-        title = { Text("Apariencia", color = OnBackground, fontWeight = FontWeight.Bold) },
+        title = { Text("Ajustes", color = OnBackground, fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -88,7 +88,7 @@ internal fun GeneralSettingsDialog(
                 HorizontalDivider(color = Outline)
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Color del tema", color = OnBackground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         ThemeAccent.entries.forEach { accent ->
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Box(
@@ -115,6 +115,14 @@ internal fun GeneralSettingsDialog(
                             }
                         }
                     }
+                }
+                HorizontalDivider(color = Outline)
+                StorageSettings()
+                HorizontalDivider(color = Outline)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Con teclado", style = MaterialTheme.typography.titleMedium, color = OnBackground)
+                    Text("Ctrl + F · Buscar en el chat\nCtrl + K · Búsqueda general\nCtrl + , · Ajustes\nEsc · Cancelar respuesta al escribir",
+                        color = Muted, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         },

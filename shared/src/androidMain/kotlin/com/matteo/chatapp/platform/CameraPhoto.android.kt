@@ -5,6 +5,9 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+@androidx.compose.runtime.Composable
+actual fun PrepareCameraCapture() = Unit
+
 actual suspend fun flipCameraPhoto(file: PickedAttachmentFile): PickedAttachmentFile = withContext(Dispatchers.IO) {
     require(file.contentType == "image/jpeg" || file.contentType == "image/jpg") { "La captura debe ser una foto JPEG" }
     val directory = File(AndroidPlatform.context.cacheDir, "camera-captures").apply { mkdirs() }

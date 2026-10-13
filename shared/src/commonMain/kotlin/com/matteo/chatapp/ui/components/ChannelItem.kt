@@ -48,11 +48,13 @@ fun ChannelItem(
         Spacer(Modifier.width(8.dp))
         Text(
             text = channel.name,
+            modifier = Modifier.weight(1f),
             color = if (isSelected) OnBackground else OnSurface,
             fontSize = 14.sp,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+            fontWeight = if (isSelected || channel.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
+        ActivityBadge(channel.unreadCount, channel.mentionCount)
     }
 }

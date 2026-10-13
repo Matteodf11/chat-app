@@ -33,9 +33,58 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertNotNull
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
+    @Test
+    fun revisitingChatShowsCachedHistoryWhileRefreshingAndKeepsItOnFailure() = runViewModelTest {
+        val target = ConversationTarget.DirectMessage("dm-1")
+        val original = chatMessage("cached", dmId = target.id)
+        val repository = ChatTestRepository(mutableMapOf(target to MessagePage(listOf(original), true)))
+        val vm = createViewModel(repository)
+        try {
+            vm.loadDmMessages(target.id)
+            advanceUntilIdle()
+            vm.clearMessages()
+            val refresh = CompletableDeferred<MessagePage>()
+            repository.pageHandler = { _, _ -> refresh.await() }
+            vm.loadDmMessages(target.id)
+            assertEquals(listOf(original), vm.conversationState.value.messages)
+            advanceUntilIdle()
+            assertFalse(vm.conversationState.value.isLoading)
+            assertTrue(vm.conversationState.value.isSyncing)
+            assertTrue(vm.conversationState.value.hasOlderMessages)
+            refresh.completeExceptionally(IllegalStateException("offline"))
+            advanceUntilIdle()
+            assertEquals(listOf(original), vm.conversationState.value.messages)
+            assertNotNull(vm.conversationState.value.loadError)
+        } finally { vm.disconnectRealtime() }
+    }
+
+    @Test
+    fun cachedChatsStaySeparateAndReceiveDeletesWhileClosed() = runViewModelTest {
+        val first = ConversationTarget.DirectMessage("dm-1")
+        val second = ConversationTarget.DirectMessage("dm-2")
+        val personal = ChatTestPersonalMessagesSource()
+        val repository = ChatTestRepository(mutableMapOf(
+            first to MessagePage(listOf(chatMessage("one", dmId = first.id)), false),
+            second to MessagePage(listOf(chatMessage("two", dmId = second.id)), false)))
+        val vm = createViewModel(repository, personalMessagesSource = personal)
+        try {
+            vm.loadDmMessages(first.id)
+            advanceUntilIdle()
+            vm.loadDmMessages(second.id)
+            advanceUntilIdle()
+            personal.emit(chatMessage("one", dmId = first.id).copy(deleted = true))
+            advanceUntilIdle()
+            vm.loadDmMessages(first.id)
+            assertTrue(vm.conversationState.value.messages.isEmpty())
+            vm.loadDmMessages(second.id)
+            assertEquals(listOf("two"), vm.conversationState.value.messages.map { it.id })
+        } finally { vm.disconnectRealtime() }
+    }
+
     @Test
     fun lateDiskRestorePreservesMoreRecentActivityThanServerSnapshot() = runViewModelTest {
         val restored = CompletableDeferred<Unit>()

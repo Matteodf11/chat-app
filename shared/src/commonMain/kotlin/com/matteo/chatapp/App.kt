@@ -37,6 +37,7 @@ fun App() {
     }
 
     ChatAppTheme(themeMode = themeMode, themeAccent = themeAccent) {
+        com.matteo.chatapp.platform.PrepareCameraCapture()
         var sessionKey by remember { mutableStateOf(0) }
         var isLoggedIn by remember { mutableStateOf(SessionManager.isLoggedIn()) }
         var isCheckingSession by remember { mutableStateOf(SessionManager.hasRememberedSession()) }

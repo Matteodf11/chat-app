@@ -22,9 +22,17 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Chimera"
-            packageVersion = "1.0.0"
+            packageVersion = "1.1.1"
+            description = "Chimera - Mensajes, amigos y comunidades"
+            vendor = "Chimera"
+            modules("java.instrument", "java.management", "java.net.http", "java.prefs", "jdk.crypto.ec", "jdk.unsupported")
             windows {
                 iconFile.set(project.file("src/main/resources/chimera.ico"))
+                perUserInstall = true
+                dirChooser = true
+                menuGroup = "Chimera"
+                shortcut = true
+                upgradeUuid = "5d2a42cd-b2b4-4cd9-8c39-46a8dde93937"
             }
         }
     }

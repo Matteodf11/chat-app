@@ -50,6 +50,7 @@ class ChatViewModel(
     suspend fun refreshAttachment(message: Message): Message = chatRepository.refreshMessage(message.id)
 
 
+    private val historyCache = ConversationHistoryCache()
     private val _conversationState = MutableStateFlow(ChatConversationUiState())
     val conversationState: StateFlow<ChatConversationUiState> = _conversationState.asStateFlow()
 
@@ -120,6 +121,7 @@ class ChatViewModel(
     val searchState: StateFlow<MessageSearchUiState> = _searchState.asStateFlow()
 
     private val outbox = linkedMapOf<String, PendingMessage>()
+    internal val composerDrafts = ComposerDrafts()
     private var connectionCollectJob: Job? = null
     private var refreshRequested = false
     private val changesDuringSync = linkedMapOf<String, Message>()
@@ -181,7 +183,12 @@ class ChatViewModel(
         if (activeConversation == destination) return
         resetRealtime()
         activeConversation = destination
-        publishPending()
+        val cached = historyCache.get(destination)
+        _conversationState.value = ChatConversationUiState(
+            messages = cached?.messages.orEmpty().map(::withReadReceipt),
+            hasOlderMessages = cached?.hasOlder ?: false,
+            pendingMessages = outbox.values.filter { it.target == destination }
+        )
         refreshConversation()
         collectRealtimeMessages()
         collectTypingEvents()
@@ -189,7 +196,7 @@ class ChatViewModel(
             conversationEventsSource.connected.collect { connected ->
                 if (activeConversation == destination) {
                     _conversationState.update { it.copy(isConnected = connected) }
-                    if (connected) refreshConversation()
+                    if (connected && conversationLoadJob?.isActive != true) refreshConversation()
                 }
             }
         }
@@ -554,10 +561,13 @@ class ChatViewModel(
     }
 
     fun disconnectRealtime() {
+        composerDrafts.clear()
         imageGalleryJob?.cancel()
         stopped = true
         sharedItemsJob?.cancel()
         resetRealtime()
+        historyCache.clear()
+        activeConversation = null
         profileEventsJob?.cancel()
         profileEventsCollectJob?.cancel()
         personalMessagesJob?.cancel()
@@ -752,9 +762,11 @@ class ChatViewModel(
         if (!matches) return
         if (_conversationState.value.isSyncing) changesDuringSync[message.id] = message
         acknowledgePending(message)
-        publishPending()
         _conversationState.update {
-            it.copy(messages = it.messages.withMessageChange(withReadReceipt(message)))
+            it.copy(
+                messages = it.messages.withMessageChange(withReadReceipt(message)),
+                pendingMessages = outbox.values.filter { pending -> pending.target == activeConversation }
+            )
         }
     }
 
@@ -788,6 +800,7 @@ class ChatViewModel(
     private fun applyPersonalMessage(message: Message) {
         if (message.senderId in blockedUserIds && !message.deleted) return
         val dmId = message.dmId ?: return
+        historyCache.update(ConversationTarget.DirectMessage(dmId), withReadReceipt(message))
         if (message.deleted || message.edited) {
             if (activeConversation == ConversationTarget.DirectMessage(dmId)) applyMessageChange(message)
             _inboxRevision.value++
@@ -885,6 +898,11 @@ class ChatViewModel(
     }
 
     private fun applyProfileEvent(event: ProfileEvent) {
+        historyCache.mapMessages { message ->
+            if (message.senderId == event.userId)
+                message.copy(senderUsername = event.username, senderAvatar = event.avatarUrl)
+            else message
+        }
         _conversationState.update { state ->
             state.copy(
                 messages = state.messages.map { message ->
@@ -899,6 +917,10 @@ class ChatViewModel(
     }
 
     private fun resetRealtime() {
+        activeConversation?.let { target ->
+            val state = _conversationState.value
+            if (state.messages.isNotEmpty()) historyCache.put(target, state.messages, state.hasOlderMessages)
+        }
         changesDuringSync.clear()
         connectionCollectJob?.cancel()
         refreshRequested = false

@@ -24,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.SpanStyle
@@ -55,22 +57,25 @@ fun MessageItem(
     onOpenImage: (Message) -> Unit = {},
     onDownload: (Message) -> Unit = {},
     onForward: ((Message) -> Unit)? = null,
-    allowEdit: Boolean = true
+    allowEdit: Boolean = true,
+    pending: Boolean = false
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var editedContent by remember(message.id, message.content) { mutableStateOf(message.content) }
+    val mentionedMe = !message.deleted && message.mentionedUserIds.contains(com.matteo.chatapp.repository.SessionManager.getUserId())
     val sentMetadata = listOfNotNull(
         "Editado".takeIf { message.edited },
         message.createdAt?.substringAfter("T", "")?.take(5)?.takeIf { it.isNotBlank() },
-        if (message.readAt != null) "Leído" else "Enviado"
+        if (pending) "◷" else if (message.readAt != null) "Leído" else "Enviado"
     ).joinToString(" · ")
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (highlighted) PrimarySoft else androidx.compose.ui.graphics.Color.Transparent)
-            .clickable { showMenu = true }
+            .semantics { if (pending) stateDescription = "Envío pendiente de confirmación" }
+            .background(if (highlighted || mentionedMe) PrimarySoft else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(enabled = !pending) { showMenu = true }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Top
     ) {
@@ -83,6 +88,7 @@ fun MessageItem(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
+            if (mentionedMe) Text("Te ha mencionado", color = Primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             if (message.replyToId != null) {
                 Row(
                     modifier = Modifier
@@ -138,6 +144,11 @@ fun MessageItem(
                 Text(
                     text = buildAnnotatedString {
                         append(message.content)
+                        if (message.mentionedUserIds.isNotEmpty()) {
+                            Regex("(?<![\\p{L}\\p{N}_@])@[\\p{L}\\p{N}_.-]+").findAll(message.content).forEach {
+                                addStyle(SpanStyle(color = Primary, fontWeight = FontWeight.SemiBold), it.range.first, it.range.last + 1)
+                            }
+                        }
                         if (canModify && message.attachmentName == null) {
                             withStyle(SpanStyle(color = Muted, fontSize = 11.sp)) {
                                 append("   $sentMetadata")
@@ -151,12 +162,13 @@ fun MessageItem(
             }
             if (message.attachmentName != null) {
                 Spacer(Modifier.height(7.dp))
-                AttachmentCard(message, onOpenImage, onDownload)
+                if (pending) Text(message.attachmentName, color = OnSurface, fontSize = 12.sp)
+                else AttachmentCard(message, onOpenImage, onDownload)
             }
             if (message.edited && !canModify) {
                 Text(text = "Editado", color = Muted, fontSize = 10.sp)
             }
-            if (canModify && message.attachmentName != null && message.attachmentContentType?.startsWith("image/") != true) {
+            if (canModify && message.attachmentName != null && (pending || message.attachmentContentType?.startsWith("image/") != true)) {
                 Text(sentMetadata, modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
                     color = Muted, fontSize = 11.sp)
             }

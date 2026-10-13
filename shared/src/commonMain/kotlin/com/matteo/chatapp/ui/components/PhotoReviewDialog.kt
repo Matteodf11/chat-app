@@ -29,6 +29,7 @@ import com.matteo.chatapp.platform.PickedAttachmentFile
 @Composable
 internal fun PhotoReviewDialog(
     files: List<PickedAttachmentFile>, initialComment: String, camera: Boolean, working: Boolean, error: String?,
+    onCommentChange: (String) -> Unit = {},
     onRemove: (Int) -> Unit, onRetake: () -> Unit, onFlip: (Int) -> Unit, onSend: (String) -> Unit, onDismiss: () -> Unit
 ) {
     var selected by remember { mutableStateOf(0) }
@@ -40,7 +41,7 @@ internal fun PhotoReviewDialog(
             Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (files.size == 1) "Revisar foto" else "Revisar fotos · ${index+1}/${files.size}", Modifier.weight(1f))
-                    IconButton(enabled = !working, onClick = onDismiss) { Icon(Icons.Rounded.Close, "Cancelar") }
+                    IconButton(enabled = !working, onClick = onDismiss) { Icon(Icons.Rounded.Close, "Volver al chat") }
                 }
                 PickedPhoto(files[index], 1024, Modifier.fillMaxWidth().height(260.dp))
                 if (files.size > 1) LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -61,7 +62,7 @@ internal fun PhotoReviewDialog(
                         Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Quitar")
                     }
                 }
-                OutlinedTextField(comment, { comment = it.take(4000) }, enabled = !working,
+                OutlinedTextField(comment, { comment = it.take(4000); onCommentChange(comment) }, enabled = !working,
                     placeholder = { Text("Añade un comentario") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Button(enabled = !working, onClick = { onSend(comment) }, modifier = Modifier.fillMaxWidth()) {

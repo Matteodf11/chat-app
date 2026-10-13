@@ -53,5 +53,6 @@ fun ServerItem(
         ) {
             AvatarImage(avatarUrl = server.iconUrl, name = server.name, size = 44)
         }
+        ActivityBadge(server.unreadCount, server.mentionCount, Modifier.align(Alignment.BottomEnd), compact = true)
     }
 }

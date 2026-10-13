@@ -68,6 +68,10 @@ kotlin {
         val jvmMain by getting {
             dependencies {
                 implementation(libs.ktor.client.java)
+                implementation("io.github.eduramiba:webcam-capture-driver-native:1.3.1")
+                implementation("com.github.sarxos:webcam-capture:0.3.12") {
+                    exclude(group = "com.nativelibs4java", module = "bridj")
+                }
             }
         }
     }

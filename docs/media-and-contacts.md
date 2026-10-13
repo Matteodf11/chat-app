@@ -131,11 +131,22 @@ color personal, con una transición breve al ganar o perder el foco.
 Las fotos conservan su proporción al salir y volver a entrar en pantalla.
 Una caché de miniaturas de hasta 24 MB evita decodificarlas de nuevo en cada
 pasada; la clave es el mensaje, independiente de la renovación de su URL privada.
+Los avatares usan otra caché de hasta 8 MB, compartida entre pantallas, con
+decodificación acotada según la densidad de pantalla. Al volver a una pestaña se
+consulta la imagen ya cargada antes del primer fotograma, evitando mostrar la
+inicial mientras se consulta la caché. Las solicitudes simultáneas de la misma
+imagen se agrupan mediante un bloqueo y una segunda comprobación de caché.
+Ambas cachés viven durante el proceso; la primera visita tras arrancar necesita
+descargar las imágenes. Un cambio de URL del avatar solicita la imagen nueva.
 El seguimiento de mensajes nuevos mide la distancia al final en píxeles, no en
 número de tarjetas, para respetar la lectura de una foto alta. Cargar historial
 o actualizar un envío pendiente no fuerza el desplazamiento; enviar un mensaje
 propio sí lleva al final. El teclado ya no fuerza un salto por cada fotograma
-de su animación.
+de su animación. Mientras se sigue el final, los cambios de altura de las fotos
+y del área visible reajustan el borde inferior. Un gesto o rueda para leer el
+historial desactiva ese seguimiento; buscar un mensaje o saltar a una respuesta
+también lo desactiva. La corrección de una foto ya visible desplaza únicamente
+la distancia restante, sin alinear primero su borde superior.
 
 Comprobar en móvil: abrir adjuntos con teclado visible, cerrar por gesto y por
 atrás, mantener pulsada una conversación, y usar los paneles en horizontal.
@@ -152,3 +163,19 @@ Las acciones de guardar/cambiar contraseña quedan fuera del contenido desplazab
 durante una operación se bloquean la edición, el guardado y el cierre.
 Comprobar con teclado abierto y pantalla horizontal, nombres/correos largos,
 cambio y cancelación de imágenes, estados y errores de guardado/contraseña.
+
+En Ajustes → Almacenamiento se muestra la caché de imágenes en memoria y los
+temporales de imágenes compartidas/cámara. La limpieza libera las cachés (máximo
+32 MB en conjunto) y únicamente archivos temporales de más de 24 horas en los directorios
+dedicados. Las imágenes todavía visibles pueden conservar su bitmap hasta salir
+de pantalla. Una descarga iniciada antes de limpiar no repuebla la caché después.
+No se recorren subdirectorios, ni se tocan descargas, sesiones, borradores o cola
+de envío. Los tamaños consultados en disco y la limpieza se ejecutan en segundo
+plano; los temporales recientes se conservan para permitir compartir/capturar.
+
+Pruebas manuales: preparar una respuesta con foto y comentario en dos chats,
+cerrar la revisión, cambiar de chat y volver; repetir con documento y nota de voz
+ya terminada. Enviar uno y comprobar que el borrador del otro sigue intacto.
+Recibir mensajes leyendo arriba, cargar páginas antiguas y pulsar el contador.
+Limpiar caché con fotos visibles y con un envío fallido pendiente; después volver
+a abrir las fotos y reintentar el envío.

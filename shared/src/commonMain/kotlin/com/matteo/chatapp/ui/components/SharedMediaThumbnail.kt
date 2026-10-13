@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -16,12 +14,14 @@ import androidx.compose.ui.unit.dp
 import com.matteo.chatapp.ui.theme.SurfaceVariant
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.withLock
 
 @Composable
 fun SharedMediaThumbnail(url: String?, description: String?, modifier: Modifier = Modifier, maxEdge: Int = 256,
     showFullImage: Boolean = false, cacheKey: String = url.orEmpty()) {
-    var ratio by rememberSaveable(cacheKey) { mutableStateOf<Float?>(null) }
-    var bitmap by remember(cacheKey, maxEdge) { mutableStateOf<ImageBitmap?>(null) }
+    val cached = remember(cacheKey, maxEdge) { thumbnailCache.peek("$cacheKey:$maxEdge") }
+    var ratio by rememberSaveable(cacheKey) { mutableStateOf(cached?.let { it.width.toFloat() / it.height.coerceAtLeast(1) }) }
+    var bitmap by remember(cacheKey, maxEdge) { mutableStateOf(cached) }
     LaunchedEffect(url, cacheKey, maxEdge) {
         bitmap = url?.let { loadSharedThumbnail(it, maxEdge, cacheKey) }
         bitmap?.let { ratio = it.width.toFloat() / it.height.coerceAtLeast(1) }
@@ -30,7 +30,8 @@ fun SharedMediaThumbnail(url: String?, description: String?, modifier: Modifier 
         BoxWithConstraints(modifier) {
             val availableWidth = maxWidth.coerceAtMost(360.dp)
             val image = bitmap
-            val imageRatio = ratio ?: (availableWidth.value / 180f).coerceAtLeast(0.01f)
+            val imageRatio = image?.let { it.width.toFloat() / it.height.coerceAtLeast(1) }
+                ?: ratio ?: (availableWidth.value / 180f).coerceAtLeast(0.01f)
             val height = (availableWidth / imageRatio).coerceAtMost(420.dp)
             val frame = Modifier.size(height * imageRatio, height)
             if (image != null) {
@@ -45,29 +46,22 @@ fun SharedMediaThumbnail(url: String?, description: String?, modifier: Modifier 
 }
 
 private val mediaLoads = Semaphore(3)
-private val mediaCacheMutex = Mutex()
-private val mediaCache = LinkedHashMap<String, ImageBitmap>()
-private var mediaCacheBytes = 0L
-private const val MAX_MEDIA_CACHE_BYTES = 24L * 1024 * 1024
+private val imageLocks = List(32) { kotlinx.coroutines.sync.Mutex() }
+internal suspend fun loadSharedThumbnail(url: String, maxEdge: Int = 256, cacheKey: String = url): ImageBitmap? =
+    loadCachedImage(url, maxEdge, "$cacheKey:$maxEdge", thumbnailCache)
 
-internal suspend fun loadSharedThumbnail(url: String, maxEdge: Int = 256, cacheKey: String = url): ImageBitmap? {
-    val key = "$cacheKey:$maxEdge"
-    mediaCacheMutex.withLock {
-        mediaCache.remove(key)?.let { cached -> mediaCache[key] = cached; return cached }
+internal suspend fun loadCachedImage(url: String, maxEdge: Int, key: String,
+    cache: MediaMemoryCache<ImageBitmap>): ImageBitmap? {
+    cache.get(key)?.let { return it }
+    // Serialize identical requests and recheck after acquiring the lock.
+    val lock = imageLocks[(key.hashCode() and Int.MAX_VALUE) % imageLocks.size]
+    return lock.withLock {
+        cache.get(key)?.let { return@withLock it }
+        val generation = cache.generation()
+        val image = mediaLoads.withPermit { loadRemoteImage(url, maxEdge) } ?: return@withLock null
+        cache.put(key, image, image.width.toLong() * image.height * 4, generation)
+        image
     }
-    val image = mediaLoads.withPermit { loadRemoteImage(url, maxEdge) } ?: return null
-    val bytes = image.width.toLong() * image.height * 4
-    if (bytes <= MAX_MEDIA_CACHE_BYTES) mediaCacheMutex.withLock {
-        mediaCache.remove(key)?.let { mediaCacheBytes -= it.width.toLong() * it.height * 4 }
-        while (mediaCache.isNotEmpty() && mediaCacheBytes + bytes > MAX_MEDIA_CACHE_BYTES) {
-            val oldest = mediaCache.entries.first()
-            mediaCacheBytes -= oldest.value.width.toLong() * oldest.value.height * 4
-            mediaCache.remove(oldest.key)
-        }
-        mediaCache[key] = image
-        mediaCacheBytes += bytes
-    }
-    return image
 }
 
 internal expect suspend fun loadRemoteImage(url: String, maxEdge: Int): ImageBitmap?

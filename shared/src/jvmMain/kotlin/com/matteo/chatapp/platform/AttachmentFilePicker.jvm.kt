@@ -54,8 +54,6 @@ actual suspend fun saveAttachment(url: String, fileName: String): Boolean {
     }
 }
 
-actual fun supportsCurrentLocation(): Boolean = false
-actual suspend fun currentLocation(): SharedLocation = error("Introduce las coordenadas del lugar que quieras compartir")
 
 actual fun openExternalUrl(url: String) {
     if (Desktop.isDesktopSupported()) Desktop.getDesktop().browse(URI(url))
@@ -94,8 +92,6 @@ private val allowedContentTypes = setOf(
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
 
-actual fun supportsPhotoCapture(): Boolean = false
-actual suspend fun capturePhoto(): PickedAttachmentFile? = null
 actual suspend fun pickPhotoAttachments(): List<PickedAttachmentFile> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
     val dialog = FileDialog(null as Frame?, "Seleccionar fotos", FileDialog.LOAD)
     dialog.isMultipleMode = true

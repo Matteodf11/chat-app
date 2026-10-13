@@ -10,7 +10,9 @@ data class Server(
     val iconUrl: String? = null,
     val ownerUsername: String,
     val myRole: String? = null,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val unreadCount: Long = 0,
+    val mentionCount: Long = 0
 )
 
 @Serializable
@@ -19,7 +21,9 @@ data class Channel(
     val name: String,
     val type: String,
     val serverId: String,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val unreadCount: Long = 0,
+    val mentionCount: Long = 0
 )
 
 @Serializable
@@ -79,3 +83,9 @@ data class ServerEvent(
     val serverId: String,
     val role: String? = null
 )
+
+@Serializable
+data class ChannelActivity(val channelId: String, val serverId: String, val unreadCount: Long, val mentionCount: Long)
+
+@Serializable
+data class ChannelReadRequest(val messageId: String)

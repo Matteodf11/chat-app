@@ -13,6 +13,8 @@ expect suspend fun pickPhotoAttachment(): PickedAttachmentFile?
 expect suspend fun pickPhotoAttachments(): List<PickedAttachmentFile>
 expect fun supportsPhotoCapture(): Boolean
 expect suspend fun capturePhoto(): PickedAttachmentFile?
+@androidx.compose.runtime.Composable
+expect fun PrepareCameraCapture()
 expect suspend fun flipCameraPhoto(file: PickedAttachmentFile): PickedAttachmentFile
 
 /** Mirror the displayed image horizontally, including portraits with rotated pixels. */
@@ -47,6 +49,7 @@ expect suspend fun shareImage(url: String, fileName: String, contentType: String
 
 expect fun supportsCurrentLocation(): Boolean
 expect suspend fun currentLocation(): SharedLocation
+expect fun openLocationSettings()
 
 data class SharedLocation(val latitude: Double, val longitude: Double) {
     init {

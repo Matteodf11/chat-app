@@ -1,6 +1,7 @@
 package com.matteo.chatapp.ui.screens
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.LocationOn
@@ -32,9 +34,16 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -62,6 +71,8 @@ import kotlinx.coroutines.launch
 
 internal data class ChatAreaState(
     val destinationKey: String,
+    val newMessageCount: Int = 0,
+    val draft: com.matteo.chatapp.viewmodel.ComposerDraft = com.matteo.chatapp.viewmodel.ComposerDraft(),
     val title: String,
     val subtitle: String,
     val messages: List<Message>,
@@ -72,6 +83,7 @@ internal data class ChatAreaState(
     val messageInput: String,
     val isUploadingAttachment: Boolean,
     val pendingMessages: List<com.matteo.chatapp.viewmodel.PendingMessage> = emptyList(),
+    val ownAvatarUrl: String? = null,
     val isLoading: Boolean = false,
     val isConnected: Boolean = false,
     val isSyncing: Boolean = false,
@@ -80,10 +92,14 @@ internal data class ChatAreaState(
     val online: Boolean? = null,
     val typingText: String? = null,
     val highlightedMessageId: String? = null,
-    val canMessage: Boolean = true
+    val canMessage: Boolean = true,
+    val mentionMembers: List<com.matteo.chatapp.model.ServerMember> = emptyList()
 )
 
 internal data class ChatAreaActions(
+    val onScrollToLatest: () -> Unit,
+    val onUserScroll: () -> Unit,
+    val onDraftChange: ((com.matteo.chatapp.viewmodel.ComposerDraft) -> com.matteo.chatapp.viewmodel.ComposerDraft) -> Boolean,
     val onLoadOlder: () -> Unit,
     val onEditMessage: (String, String) -> Unit,
     val onDeleteMessage: (String) -> Unit,
@@ -124,6 +140,16 @@ internal fun ChatArea(
     val messageError = state.messageError
     val replyingTo = state.replyingTo
     val messageInput = state.messageInput
+    var composerValue by remember(destinationKey) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(messageInput,
+        androidx.compose.ui.text.TextRange(messageInput.length))) }
+    LaunchedEffect(messageInput) {
+        if (composerValue.text != messageInput) composerValue = androidx.compose.ui.text.input.TextFieldValue(messageInput,
+            androidx.compose.ui.text.TextRange(messageInput.length))
+    }
+    val mention = if (composerValue.selection.collapsed) mentionQuery(messageInput, composerValue.selection.end) else null
+    val suggestions = if (mention != null && state.canMessage) state.mentionMembers
+        .filter { it.userId != SessionManager.getUserId() && it.username.startsWith(mention.query, ignoreCase = true) }
+        .sortedBy { it.username.lowercase() }.take(5) else emptyList()
     val isUploadingAttachment = state.isUploadingAttachment
     val onBack = actions.onBack
     val onSearch = actions.onSearch
@@ -142,19 +168,38 @@ internal fun ChatArea(
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var composerFocused by remember(destinationKey) { mutableStateOf(false) }
+    val composerFocusRequester = remember(destinationKey) { FocusRequester() }
+    var mentionsDismissed by remember(destinationKey) { mutableStateOf(false) }
+    var selectedMentionIndex by remember(destinationKey, suggestions.map { it.userId }) { mutableIntStateOf(0) }
+    fun completeMention(member: com.matteo.chatapp.model.ServerMember) {
+        val query = mention ?: return
+        val (text, cursor) = insertMention(composerValue.text, query, member.username)
+        composerValue = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(cursor))
+        mentionsDismissed = true
+        onInputChange(text)
+        composerFocusRequester.requestFocus()
+        keyboard?.show()
+    }
     val composerBorder by animateColorAsState(if (composerFocused) Primary else Primary.copy(alpha = 0.55f), tween(120))
-    var pendingAttachment by remember(destinationKey) { mutableStateOf<PickedAttachmentFile?>(null) }
+    val pendingAttachment = state.draft.attachment
     var isRecordingVoice by remember(destinationKey) { mutableStateOf(false) }
     var recordingSeconds by remember(destinationKey) { mutableStateOf(0) }
     var recordingError by remember(destinationKey) { mutableStateOf<String?>(null) }
     var attachmentMenu by remember(destinationKey) { mutableStateOf(false) }
     var locationDialog by remember(destinationKey) { mutableStateOf(false) }
-    var pendingPhotos by remember(destinationKey) { mutableStateOf<List<PickedAttachmentFile>>(emptyList()) }
-    var fromCamera by remember(destinationKey) { mutableStateOf(false) }
+    val pendingPhotos = state.draft.photos
+    var reviewPhotos by remember(destinationKey) { mutableStateOf(false) }
+    val fromCamera = state.draft.fromCamera
     var photoWorking by remember(destinationKey) { mutableStateOf(false) }
     var photoError by remember(destinationKey) { mutableStateOf<String?>(null) }
     val latestDestination by rememberUpdatedState(destinationKey)
     val latestCanMessage by rememberUpdatedState(state.canMessage)
+    fun changeDraft(change: (com.matteo.chatapp.viewmodel.ComposerDraft) -> com.matteo.chatapp.viewmodel.ComposerDraft): Boolean {
+        val saved = actions.onDraftChange(change)
+        if (!saved) recordingError = "Los adjuntos de tus borradores superan 100 MB. Envía o quita alguno antes de añadir más."
+        return saved
+    }
+    fun setAttachment(file: PickedAttachmentFile?) = changeDraft { it.copy(attachment = file) }
     fun selectPhotos(camera: Boolean) {
         val target = destinationKey
         photoWorking = true
@@ -163,10 +208,11 @@ internal fun ChatArea(
                 val photos = if (camera) listOfNotNull(com.matteo.chatapp.platform.capturePhoto())
                     else com.matteo.chatapp.platform.pickPhotoAttachments()
                 if (latestDestination == target && latestCanMessage && photos.isNotEmpty()) {
-                    pendingPhotos = photos
-                    fromCamera = camera
-                    photoError = null
-                    recordingError = null
+                    if (changeDraft { it.copy(photos = photos, fromCamera = camera, attachment = null) }) {
+                        reviewPhotos = true
+                        photoError = null
+                        recordingError = null
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
@@ -175,10 +221,11 @@ internal fun ChatArea(
             } finally { photoWorking = false }
         }
     }
-    if (pendingPhotos.isNotEmpty() && state.canMessage) com.matteo.chatapp.ui.components.PhotoReviewDialog(
+    if (reviewPhotos && pendingPhotos.isNotEmpty() && state.canMessage) com.matteo.chatapp.ui.components.PhotoReviewDialog(
         files = pendingPhotos, initialComment = messageInput, camera = fromCamera, working = photoWorking,
         error = photoError,
-        onRemove = { index -> pendingPhotos = pendingPhotos.filterIndexed { i, _ -> i != index } },
+        onCommentChange = onInputChange,
+        onRemove = { index -> changeDraft { it.copy(photos = it.photos.filterIndexed { i, _ -> i != index }) } },
         onRetake = { selectPhotos(true) },
         onFlip = { index ->
             val photo = pendingPhotos[index]
@@ -189,30 +236,33 @@ internal fun ChatArea(
                 try {
                     val flipped = com.matteo.chatapp.platform.flipCameraPhoto(photo)
                     if (latestDestination == target && latestCanMessage) {
-                        pendingPhotos = pendingPhotos.map { if (it === photo) flipped else it }
+                        changeDraft { it.copy(photos = it.photos.map { if (it === photo) flipped else it }) }
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Exception) { photoError = e.message ?: "No se pudo voltear la foto" }
                 finally { photoWorking = false }
             }
         },
-        onDismiss = { pendingPhotos = emptyList(); photoError = null },
+        onDismiss = { reviewPhotos = false; photoError = null },
         onSend = { comment ->
             photoWorking = true
             photoError = null
             actions.onSendPhotos(pendingPhotos, comment) { queued ->
                 photoWorking = false
-                if (queued) { pendingPhotos = emptyList(); pendingAttachment = null }
+                if (queued) { changeDraft { if (it.photos == pendingPhotos) it.copy(photos = emptyList()) else it }; reviewPhotos = false }
                 else photoError = "No se pudieron guardar las fotos. Vuelve a intentarlo."
             }
         }
     )
-    val canSend = state.canMessage && (messageInput.isNotBlank() || pendingAttachment != null) && !isUploadingAttachment && !isRecordingVoice
+    val canSend = state.canMessage && (messageInput.isNotBlank() || pendingAttachment != null || pendingPhotos.isNotEmpty()) && !isUploadingAttachment && !isRecordingVoice && !photoWorking
+    val showMentionSuggestions = suggestions.isNotEmpty() && !mentionsDismissed && !isRecordingVoice &&
+        !attachmentMenu && !locationDialog && !reviewPhotos
     val sendColor by animateColorAsState(if (canSend) Primary else SurfaceVariant, tween(120))
     val sendCurrent = {
         val attachment = pendingAttachment
-        if (attachment != null) {
-            onSendAttachment(attachment) { if (pendingAttachment === attachment) pendingAttachment = null }
+        if (pendingPhotos.isNotEmpty()) reviewPhotos = true
+        else if (attachment != null) {
+            onSendAttachment(attachment) { changeDraft { if (it.attachment === attachment) it.copy(attachment = null) else it } }
         } else {
             onSend()
         }
@@ -224,7 +274,7 @@ internal fun ChatArea(
             isRecordingVoice = false
             attachmentMenu = false
             locationDialog = false
-            pendingPhotos = emptyList()
+            reviewPhotos = false
         }
     }
     DisposableEffect(destinationKey) {
@@ -237,7 +287,7 @@ internal fun ChatArea(
             if (isRecordingVoice) recordingSeconds++
         }
         if (isRecordingVoice && recordingSeconds >= 300) {
-            pendingAttachment = stopVoiceRecording()
+            setAttachment(stopVoiceRecording())
             isRecordingVoice = false
         }
     }
@@ -252,7 +302,7 @@ internal fun ChatArea(
         if (imeBottom > 0 && messages.isNotEmpty() && !listState.canScrollForward && !listState.isScrollInProgress) {
             val dateSeparatorCount = messages.mapNotNull { it.createdAt?.take(10) }.distinct().size
             val targetIndex = (messages.size + dateSeparatorCount + state.pendingMessages.size - 1).coerceAtLeast(0)
-            listState.scrollToItem(targetIndex)
+            listState.scrollToLatest(targetIndex + if (isLoadingOlder) 1 else 0, animated = false)
         }
     }
 
@@ -315,7 +365,17 @@ internal fun ChatArea(
                 TextButton(onClick = actions.onRefresh, enabled = !state.isSyncing) { Text("Reintentar") }
             }
         }
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).widthIn(max = 1000.dp).fillMaxWidth(), contentPadding = PaddingValues(vertical = 16.dp)) {
+        Box(Modifier.weight(1f).widthIn(max = 1000.dp).fillMaxWidth()) {
+        val latestUserScroll by rememberUpdatedState(actions.onUserScroll)
+        val scrollObserver = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (source == NestedScrollSource.UserInput && available.y != 0f) latestUserScroll()
+                    return Offset.Zero
+                }
+            }
+        }
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().nestedScroll(scrollObserver), contentPadding = PaddingValues(vertical = 16.dp)) {
             if (messages.isEmpty() && state.pendingMessages.isEmpty()) {
                 item(key = "empty-conversation") {
                     Box(Modifier.fillParentMaxHeight().fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -339,12 +399,13 @@ internal fun ChatArea(
                         DateSeparator(date)
                     }
                 }
-                item(key = message.id) {
+                item(key = if (message.senderId == SessionManager.getUserId()) message.clientMessageId?.let { "pending-$it" } ?: message.id else message.id) {
                     MessageItem(
                         message = message,
                         canModify = message.senderId == SessionManager.getUserId(),
                         onReply = { onReplyMessage(message) },
                         onReplyClick = { replyId ->
+                            actions.onUserScroll()
                             val targetIndex = messages.indexOfFirst { it.id == replyId }
                             if (targetIndex >= 0) {
                                 val separators = messages.take(targetIndex + 1)
@@ -363,20 +424,29 @@ internal fun ChatArea(
                     )
                 }
             }
-            state.pendingMessages.forEach { pending ->
+            state.pendingMessages.filterNot { pending -> messages.any {
+                it.clientMessageId == pending.id && it.senderId == SessionManager.getUserId()
+            } }.forEach { pending ->
                 item(key = "pending-${pending.id}") {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
-                        .clip(RoundedCornerShape(12.dp)).background(SurfaceVariant).padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        pending.replyToId?.let { Text("Respuesta a un mensaje", color = Muted, fontSize = 11.sp) }
-                        if (pending.content.isNotEmpty()) Text(pending.content, color = OnBackground, fontSize = 14.sp)
-                        pending.file?.let { Text(it.fileName, color = OnSurface, fontSize = 12.sp) }
-                        if (pending.status == com.matteo.chatapp.viewmodel.SendStatus.SENDING) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                CircularProgressIndicator(Modifier.size(12.dp), color = Muted, strokeWidth = 1.dp)
-                                Text("Enviando…", color = Muted, fontSize = 11.sp)
-                            }
-                        } else {
+                    val reply = messages.find { it.id == pending.replyToId }
+                    MessageItem(
+                        message = Message(
+                            id = pending.id, content = pending.content,
+                            senderId = SessionManager.getUserId(),
+                            senderUsername = SessionManager.getUsername().orEmpty(),
+                            senderAvatar = state.ownAvatarUrl,
+                            createdAt = pending.createdAt,
+                            replyToId = pending.replyToId,
+                            replyToSenderUsername = reply?.senderUsername,
+                            replyToContent = reply?.content ?: "Respuesta a un mensaje",
+                            attachmentName = pending.file?.fileName,
+                            attachmentContentType = pending.file?.contentType
+                        ),
+                        canModify = true, pending = true,
+                        onReply = {}, onReplyClick = {}, onEdit = {}, onDelete = {}
+                    )
+                    if (pending.status == com.matteo.chatapp.viewmodel.SendStatus.FAILED) {
+                        Column(Modifier.fillMaxWidth().padding(start = 70.dp, end = 20.dp, bottom = 8.dp)) {
                             Text(pending.error ?: "No se pudo confirmar el envío", color = Error, fontSize = 12.sp)
                             Row {
                                 TextButton(enabled = state.canMessage, onClick = { actions.onRetryMessage(pending.id) }) { Text("Reintentar") }
@@ -386,6 +456,9 @@ internal fun ChatArea(
                     }
                 }
             }
+        }
+        NewMessagesButton(state.newMessageCount, actions.onScrollToLatest,
+            Modifier.align(Alignment.BottomCenter).padding(12.dp))
         }
         Column(Modifier.widthIn(max = 1000.dp).fillMaxWidth().animateContentSize(tween(160))) {
         if (messageError != null || recordingError != null) {
@@ -424,6 +497,19 @@ internal fun ChatArea(
             }
         }
         if (!state.canMessage) Text("No puedes enviar mensajes en esta conversación", color = Muted, modifier = Modifier.padding(12.dp))
+        if (pendingPhotos.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().background(SurfaceVariant).padding(start = 20.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { reviewPhotos = true }, modifier = Modifier.weight(1f), enabled = !photoWorking) {
+                    Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("${pendingPhotos.size} fotos preparadas · Revisar")
+                }
+                IconButton(enabled = !photoWorking, onClick = { changeDraft { it.copy(photos = emptyList()) } }) {
+                    Icon(Icons.Rounded.Close, "Quitar fotos")
+                }
+            }
+        }
         if (pendingAttachment != null) {
             Row(
                 modifier = Modifier.fillMaxWidth().background(SurfaceVariant).padding(horizontal = 20.dp, vertical = 9.dp),
@@ -440,7 +526,7 @@ internal fun ChatArea(
                     Text(pendingAttachment!!.fileName, color = OnBackground, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     Text(formatAttachmentSize(pendingAttachment!!.size), color = Muted, fontSize = 11.sp)
                 }
-                IconButton(onClick = { pendingAttachment = null }, enabled = !isUploadingAttachment, modifier = Modifier.size(34.dp)) {
+                IconButton(onClick = { setAttachment(null) }, enabled = !isUploadingAttachment, modifier = Modifier.size(34.dp)) {
                     Icon(Icons.Rounded.Close, contentDescription = "Quitar archivo", tint = Muted)
                 }
             }
@@ -458,6 +544,27 @@ internal fun ChatArea(
                     isRecordingVoice = false
                     recordingSeconds = 0
                 }) { Text("Cancelar", color = Muted) }
+            }
+        }
+        // On desktop a mouse press can move focus before its release. Keep the rows
+        // mounted until selection completes so their click handler is not cancelled.
+        if (showMentionSuggestions) {
+            Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp), color = SurfaceElevated,
+                shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.padding(8.dp)) {
+                    Text("Mencionar a · ↑↓ elegir · Tab completar", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(8.dp))
+                    suggestions.forEachIndexed { index, member ->
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .background(if (index == selectedMentionIndex) PrimarySoft else Color.Transparent)
+                            .focusProperties { canFocus = false }.clickable {
+                            completeMention(member)
+                        }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            com.matteo.chatapp.ui.components.AvatarImage(member.avatarUrl, member.username, 28)
+                            Spacer(Modifier.width(10.dp))
+                            Text("@${member.username}", color = OnBackground, fontSize = 14.sp)
+                        }
+                    }
+                }
             }
         }
         Column(
@@ -491,8 +598,9 @@ internal fun ChatArea(
                             try {
                                 val file = pickAttachmentFile()
                                 if (latestDestination == target && latestCanMessage) {
-                                    file?.let { pendingAttachment = it }
-                                    recordingError = null
+                                    file?.let { picked ->
+                                        if (changeDraft { it.copy(attachment = picked, photos = emptyList()) }) recordingError = null
+                                    }
                                 }
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (e: Exception) { recordingError = e.message ?: "No se pudo abrir el archivo" }
@@ -504,14 +612,31 @@ internal fun ChatArea(
                 }
             }
             BasicTextField(
-                value = messageInput,
-                onValueChange = onInputChange,
+                value = composerValue,
+                onValueChange = { composerValue = it; mentionsDismissed = false; onInputChange(it.text) },
                 enabled = state.canMessage && !isRecordingVoice,
                 modifier = Modifier
                     .weight(1f).heightIn(min = 48.dp).padding(horizontal = 8.dp)
+                    .focusRequester(composerFocusRequester)
                     .onFocusChanged { composerFocused = it.isFocused }
                     .onPreviewKeyEvent { event ->
-                        if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
+                        if (event.type == KeyEventType.KeyDown && showMentionSuggestions &&
+                            event.key == Key.Tab && !event.isShiftPressed) {
+                            suggestions.getOrNull(selectedMentionIndex)?.let(::completeMention)
+                            true
+                        } else if (event.type == KeyEventType.KeyDown && showMentionSuggestions &&
+                            (event.key == Key.DirectionDown || event.key == Key.DirectionUp)) {
+                            val step = if (event.key == Key.DirectionDown) 1 else -1
+                            selectedMentionIndex = (selectedMentionIndex + step + suggestions.size) % suggestions.size
+                            true
+                        } else if (event.key == Key.Escape && event.type == KeyEventType.KeyDown &&
+                            suggestions.isNotEmpty() && !mentionsDismissed) {
+                            mentionsDismissed = true
+                            true
+                        } else if (event.key == Key.Escape && event.type == KeyEventType.KeyDown && replyingTo != null) {
+                            onCancelReply()
+                            true
+                        } else if (event.key == Key.Enter && event.type == KeyEventType.KeyDown && !event.isShiftPressed) {
                             if (canSend) sendCurrent()
                             true
                         } else {
@@ -532,7 +657,7 @@ internal fun ChatArea(
                     }
                 }
             )
-            if (isRecordingVoice || (messageInput.isBlank() && pendingAttachment == null && !isUploadingAttachment)) IconButton(
+            if (isRecordingVoice || (messageInput.isBlank() && pendingAttachment == null && pendingPhotos.isEmpty() && !isUploadingAttachment)) IconButton(
                 onClick = {
                     scope.launch {
                         if (isRecordingVoice) {
@@ -540,13 +665,12 @@ internal fun ChatArea(
                             isRecordingVoice = false
                             recordingSeconds = 0
                             if (voice != null) {
-                                pendingAttachment = voice
-                                recordingError = null
+                                if (setAttachment(voice)) recordingError = null
                             } else {
                                 recordingError = "La nota de voz es demasiado corta"
                             }
                         } else {
-                            pendingAttachment = null
+                            setAttachment(null)
                             if (startVoiceRecording()) {
                                 isRecordingVoice = true
                                 recordingError = null
@@ -621,6 +745,20 @@ internal fun EmptyState(text: String) {
             Spacer(Modifier.height(20.dp))
             Text(text, color = OnBackground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+    }
+}
+
+
+@Composable
+private fun NewMessagesButton(count: Int, onClick: () -> Unit, modifier: Modifier) {
+    AnimatedVisibility(count > 0, modifier,
+        enter = androidx.compose.animation.fadeIn(tween(120)), exit = androidx.compose.animation.fadeOut(tween(100))) {
+        FilledTonalButton(onClick = onClick,
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = PrimarySoft, contentColor = OnBackground)) {
+            Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (count == 1) "1 mensaje nuevo" else "$count mensajes nuevos")
         }
     }
 }

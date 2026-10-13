@@ -17,7 +17,6 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.PersonOutline
 import androidx.compose.material.icons.rounded.Search
@@ -93,6 +92,7 @@ internal fun MobileTopBar(
 internal fun MobileBottomNavigation(
     selected: MobileSection,
     hasUnreadMessages: Boolean,
+    hasUnreadServers: Boolean = false,
     onSelect: (MobileSection) -> Unit
 ) {
     NavigationBar(containerColor = Surface, tonalElevation = 0.dp) {
@@ -117,7 +117,9 @@ internal fun MobileBottomNavigation(
         NavigationBarItem(
             selected = selected == MobileSection.SERVERS,
             onClick = { onSelect(MobileSection.SERVERS) },
-            icon = { Icon(Icons.Rounded.Dns, contentDescription = "Servidores") },
+            icon = { BadgedBox(badge = { if (hasUnreadServers) Badge() }) {
+                Icon(Icons.Rounded.Dns, contentDescription = "Servidores")
+            } },
             label = { Text("Servidores") },
             colors = mobileNavigationColors()
         )
@@ -147,9 +149,16 @@ internal fun MobileServerRow(server: Server, onClick: () -> Unit) {
         AvatarImage(avatarUrl = server.iconUrl, name = server.name, size = 46)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(server.name, color = OnBackground, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(roleLabel(server.myRole), color = Muted, fontSize = 12.sp)
+            Text(server.name, color = OnBackground, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Tu rol: ${roleLabel(server.myRole)}", color = Primary, fontSize = 12.sp)
+            server.description?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = Muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
         }
+        com.matteo.chatapp.ui.components.ActivityBadge(server.unreadCount, server.mentionCount)
+        Spacer(Modifier.width(8.dp))
         Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = Muted, modifier = Modifier.size(18.dp))
     }
 }
@@ -355,8 +364,8 @@ private fun AccountMenu(onProfile: () -> Unit, onAppearance: () -> Unit, onLogou
             DropdownMenuItem(text = { Text("Mi perfil") },
                 leadingIcon = { Icon(Icons.Rounded.PersonOutline, null) },
                 onClick = { expanded = false; onProfile() })
-            DropdownMenuItem(text = { Text("Apariencia") },
-                leadingIcon = { Icon(Icons.Rounded.Palette, null) },
+            DropdownMenuItem(text = { Text("Ajustes") },
+                leadingIcon = { Icon(Icons.Rounded.Settings, null) },
                 onClick = { expanded = false; onAppearance() })
             HorizontalDivider(color = Outline)
             DropdownMenuItem(text = { Text("Cerrar sesión", color = Error) },

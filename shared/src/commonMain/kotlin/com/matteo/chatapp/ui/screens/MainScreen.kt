@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -151,7 +152,6 @@ fun MainScreen(
     val isAppInForeground by AppVisibility.isInForeground.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
-    var replyingTo by remember { mutableStateOf<com.matteo.chatapp.model.Message?>(null) }
     var currentDestination by remember { mutableStateOf<MainDestination>(MainDestination.Friends) }
     var showProfileSettings by remember { mutableStateOf(false) }
     var showCreateServer by remember { mutableStateOf(false) }
@@ -181,13 +181,17 @@ fun MainScreen(
         MainDestination.Friends -> null
     }
 
-    val draftOwner = SessionManager.getEmail().orEmpty()
-    var messageInput by remember(draftOwner, activeChatKey) {
-        mutableStateOf(activeChatKey?.let { com.matteo.chatapp.repository.DraftStorage.load(draftOwner, it) }.orEmpty())
+    val composerDrafts by chatViewModel.composerDrafts.state.collectAsStateWithLifecycle()
+    val composerDraft = activeChatKey?.let { composerDrafts[it] } ?: com.matteo.chatapp.viewmodel.ComposerDraft()
+    val replyingTo = composerDraft.reply
+    fun setReply(message: com.matteo.chatapp.model.Message?) {
+        activeChatKey?.let { key -> chatViewModel.composerDrafts.update(key) { it.copy(reply = message) } }
     }
+    val draftOwner = SessionManager.getEmail().orEmpty()
+    val textDrafts = remember(draftOwner) { TextDrafts(draftOwner) }
+    val messageInput = activeChatKey?.let { textDrafts.state(it).value }.orEmpty()
     fun updateDraft(text: String) {
-        messageInput = text
-        activeChatKey?.let { com.matteo.chatapp.repository.DraftStorage.save(draftOwner, it, text) }
+        activeChatKey?.let { textDrafts.update(it, text) }
     }
     val inboxRevision by chatViewModel.inboxRevision.collectAsStateWithLifecycle()
     LaunchedEffect(inboxRevision, isAppInForeground) {
@@ -201,7 +205,6 @@ fun MainScreen(
     }
 
     LaunchedEffect(activeChatKey, selectedDm?.id, isAppInForeground) {
-        replyingTo = null
         val visibleDm = (currentDestination as? MainDestination.DirectMessage)
             ?.dm
             ?.id
@@ -209,7 +212,7 @@ fun MainScreen(
         chatViewModel.setVisibleDm(visibleDm)
     }
 
-    LaunchedEffect(selectedChannel) {
+    LaunchedEffect(selectedChannel?.id) {
         selectedChannel?.let { chatViewModel.loadMessages(it.id) }
     }
 
@@ -229,16 +232,51 @@ fun MainScreen(
 
     val scrollDensity = androidx.compose.ui.platform.LocalDensity.current
     var wasNearConversationEnd by remember(activeChatKey) { mutableStateOf(true) }
-    LaunchedEffect(listState, activeChatKey, scrollDensity) {
-        snapshotFlow {
+    var programmaticScroll by remember(activeChatKey) { mutableStateOf(false) }
+    var didPositionConversation by remember(activeChatKey) { mutableStateOf(false) }
+    LaunchedEffect(activeChatKey, isAppInForeground, messages.lastOrNull()?.id) {
+        val channelId = activeChatKey?.takeIf { it.startsWith("channel:") }?.removePrefix("channel:")
+            ?: return@LaunchedEffect
+        val lastMessage = messages.lastOrNull()?.takeIf { it.channelId == channelId } ?: return@LaunchedEffect
+        while (isAppInForeground) {
+            delay(600)
             val layout = listState.layoutInfo
             val last = layout.visibleItemsInfo.lastOrNull()
-            listState.isScrollInProgress to isNearConversationEnd(last?.index, layout.totalItemsCount,
-                last?.let { it.offset + it.size } ?: 0, layout.viewportEndOffset,
-                with(scrollDensity) { 80.dp.toPx() })
-        }.collect { (scrolling, nearEnd) ->
-            // A new item changing the layout must not overwrite the user's previous position.
-            if (scrolling) wasNearConversationEnd = nearEnd
+            if (didPositionConversation && !listState.isScrollInProgress &&
+                isNearConversationEnd(last?.index, layout.totalItemsCount,
+                    last?.let { it.offset + it.size + layout.afterContentPadding } ?: 0,
+                    layout.viewportEndOffset, with(scrollDensity) { 2.dp.toPx() })) {
+                serverViewModel.markChannelRead(channelId, lastMessage.id)
+            }
+            delay(1400)
+        }
+    }
+    LaunchedEffect(isAppInForeground) { if (isAppInForeground) serverViewModel.refreshActivity() }
+    val arrivals = remember(activeChatKey) { ConversationArrivals() }
+    var newMessageCount by remember(activeChatKey) { mutableStateOf(0) }
+    LaunchedEffect(activeChatKey, messages) {
+        arrivals.update(messages, SessionManager.getUserId(), wasNearConversationEnd)
+        newMessageCount = arrivals.count
+    }
+    LaunchedEffect(listState, activeChatKey, scrollDensity) {
+        snapshotFlow {
+            Triple(listState.layoutInfo, listState.isScrollInProgress,
+                wasNearConversationEnd && !programmaticScroll && didPositionConversation)
+        }.collect { (layout, scrolling, following) ->
+            if (activeChatKey == null) return@collect
+            val last = layout.visibleItemsInfo.lastOrNull()
+            val nearEnd = isNearConversationEnd(last?.index, layout.totalItemsCount,
+                last?.let { it.offset + it.size + layout.afterContentPadding } ?: 0,
+                layout.viewportEndOffset, with(scrollDensity) { 2.dp.toPx() })
+            if (nearEnd && !scrolling) {
+                wasNearConversationEnd = true
+                arrivals.clear(); newMessageCount = 0
+            } else if (following && !scrolling && layout.totalItemsCount > 0) {
+                // A decoded photo or a resized viewport can move the bottom without a new message.
+                programmaticScroll = true
+                try { listState.scrollToLatest(layout.totalItemsCount - 1, animated = false) }
+                finally { programmaticScroll = false }
+            }
         }
     }
     LaunchedEffect(activeChatKey, messages.lastOrNull()?.id, conversationState.pendingMessages.lastOrNull()?.id, forceScrollChatKey) {
@@ -246,9 +284,15 @@ fun MainScreen(
         if ((messages.isNotEmpty() || conversationState.pendingMessages.isNotEmpty()) &&
             (shouldForceScroll || (wasNearConversationEnd && !listState.isScrollInProgress))) {
             val dateSeparatorCount = messages.mapNotNull { it.createdAt?.take(10) }.distinct().size
-            val targetIndex = (messages.size + dateSeparatorCount + conversationState.pendingMessages.size - 1).coerceAtLeast(0)
-            listState.animateScrollToItem(targetIndex)
+            val targetIndex = (messages.size + dateSeparatorCount + conversationState.pendingMessages.size +
+                (if (isLoadingOlder) 1 else 0) - 1).coerceAtLeast(0)
+            programmaticScroll = true
+            try { listState.scrollToLatest(targetIndex, animated = didPositionConversation) }
+            finally { programmaticScroll = false }
+            didPositionConversation = true
             wasNearConversationEnd = true
+            arrivals.clear()
+            newMessageCount = 0
             if (shouldForceScroll) forceScrollChatKey = null
         }
     }
@@ -261,6 +305,7 @@ fun MainScreen(
                 .mapNotNull { it.createdAt?.take(10) }
                 .distinct()
                 .size
+            wasNearConversationEnd = false
             listState.scrollToItem(targetIndex + separators)
             highlightedMessageId = targetId
             chatViewModel.consumeScrollTarget(targetId)
@@ -287,6 +332,7 @@ fun MainScreen(
         online: Boolean? = null
     ) = ChatAreaState(
         destinationKey = destinationKey,
+        newMessageCount = newMessageCount,
         title = title,
         subtitle = subtitle,
         messages = messages,
@@ -294,9 +340,12 @@ fun MainScreen(
         isLoadingOlder = isLoadingOlder,
         messageError = messageError,
         replyingTo = replyingTo,
+        draft = composerDraft,
+        mentionMembers = if (destinationKey.startsWith("channel:")) serverMembers else emptyList(),
         messageInput = messageInput,
         isUploadingAttachment = isUploadingAttachment,
         pendingMessages = conversationState.pendingMessages,
+        ownAvatarUrl = profile?.avatarUrl,
         isLoading = conversationState.isLoading,
         isConnected = conversationState.isConnected,
         isSyncing = conversationState.isSyncing,
@@ -309,6 +358,12 @@ fun MainScreen(
     )
 
     val latestActiveChatKey by rememberUpdatedState(activeChatKey)
+    fun clearSentDraft(submission: DraftSubmission?, replyId: String?) {
+        if (submission == null) return
+        textDrafts.clearIfUnchanged(submission)
+        chatViewModel.composerDrafts.update(submission.conversation) { if (it.reply?.id == replyId) it.copy(reply = null) else it }
+        if (latestActiveChatKey == submission.conversation) forceScrollChatKey = submission.conversation
+    }
 
     fun buildChatAreaActions(
         onTyping: (String) -> Unit,
@@ -316,6 +371,8 @@ fun MainScreen(
         onBack: (() -> Unit)? = null,
         onProfileClick: (() -> Unit)? = null
     ) = ChatAreaActions(
+        onScrollToLatest = { wasNearConversationEnd = true; forceScrollChatKey = activeChatKey },
+        onUserScroll = { wasNearConversationEnd = false },
         onOpenImage = chatViewModel::openImageGallery,
         onDownload = downloadMedia,
         onForward = openForward,
@@ -326,44 +383,35 @@ fun MainScreen(
         onRefresh = chatViewModel::refreshConversation,
         onEditMessage = chatViewModel::editMessage,
         onDeleteMessage = chatViewModel::deleteMessage,
-        onReplyMessage = { replyingTo = it },
-        onCancelReply = { replyingTo = null },
+        onDraftChange = { change -> activeChatKey?.let { chatViewModel.composerDrafts.update(it, change) } ?: false },
+        onReplyMessage = { setReply(it) },
+        onCancelReply = { setReply(null) },
         onInputChange = { text ->
             updateDraft(text.take(4000))
             onTyping(text)
         },
         onSendPhotos = { files, comment, result ->
-            val draft = messageInput
+            val submission = activeChatKey?.let { textDrafts.capture(it) }
             val reply = replyingTo?.id
-            val chatKey = activeChatKey
             chatViewModel.sendPhotos(files, comment, reply) { queued ->
-                if (queued && latestActiveChatKey == chatKey) {
-                    forceScrollChatKey = activeChatKey
-                    if (messageInput == draft) updateDraft("")
-                    if (replyingTo?.id == reply) replyingTo = null
-                }
+                if (queued) clearSentDraft(submission, reply)
                 result(queued)
             }
         },
         onSendAttachment = { file, clearSelection ->
-            val content = messageInput
+            val submission = activeChatKey?.let { textDrafts.capture(it) }
             val reply = replyingTo?.id
-            chatViewModel.sendAttachment(file, content, reply) {
-                if (messageInput == content) updateDraft("")
-                if (replyingTo?.id == reply) replyingTo = null
-                forceScrollChatKey = activeChatKey
+            chatViewModel.sendAttachment(file, submission?.text.orEmpty(), reply) {
+                clearSentDraft(submission, reply)
                 clearSelection()
             }
         },
         onSend = {
-            val content = messageInput
+            val submission = activeChatKey?.let { textDrafts.capture(it) }
+            val content = submission?.text.orEmpty()
             if (content.isNotBlank()) {
                 val reply = replyingTo?.id
-                onSendText(content, reply) {
-                    forceScrollChatKey = activeChatKey
-                    if (messageInput == content) updateDraft("")
-                    if (replyingTo?.id == reply) replyingTo = null
-                }
+                onSendText(content, reply) { clearSentDraft(submission, reply) }
             }
         },
         onBack = onBack,
@@ -371,7 +419,17 @@ fun MainScreen(
         onProfileClick = onProfileClick
     )
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Background).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Background).windowInsetsPadding(WindowInsets.safeDrawing)
+        .onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown && event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+                when (event.key) {
+                    Key.F -> if (activeChatKey != null) { openMessageSearch(); true } else false
+                    Key.K -> { openGlobalSearch(); true }
+                    Key.Comma -> { showGeneralSettings = true; true }
+                    else -> false
+                }
+            } else false
+        }) {
     val isMobile = maxWidth < 840.dp
     val sidebarWidth = (maxWidth * 0.22f).coerceIn(232.dp, 280.dp)
     val navigationKey = activeChatKey ?: "${mobileSection}:${selectedServer?.id}:${currentDestination}"
@@ -526,7 +584,7 @@ fun MainScreen(
                     }
                     else -> Column(Modifier.fillMaxSize()) {
                         MobileTopBar(
-                            title = selectedServer?.name ?: "Servidores",
+                            title = if (selectedServer == null) "Servidores" else "Canales",
                             onSearch = openGlobalSearch,
                             onBack = selectedServer?.let {
                                 {
@@ -541,14 +599,10 @@ fun MainScreen(
                                 friendViewModel.logout(onLogout)
                             },
                             actions = {
-                                if (selectedServer != null) {
-                                    IconButton(onClick = { showServerSettings = true }) {
-                                        Icon(Icons.Rounded.Settings, contentDescription = "Ajustes del servidor", tint = OnSurface)
-                                    }
-                                } else {
+                                if (selectedServer == null) {
                                     IconButton(onClick = {
                                         serverViewModel.loadPendingInvitations()
-                                        showServerInvitations = true
+                                        serverViewModel.clearFeedback(); showServerInvitations = true
                                     }) {
                                         BadgedBox(badge = {
                                             if (serverInvitations.isNotEmpty()) Badge { Text(serverInvitations.size.toString()) }
@@ -556,37 +610,30 @@ fun MainScreen(
                                             Icon(Icons.Rounded.MailOutline, contentDescription = "Invitaciones", tint = OnSurface)
                                         }
                                     }
-                                    IconButton(onClick = { showCreateServer = true }) {
+                                    IconButton(onClick = { serverViewModel.clearFeedback(); showCreateServer = true }) {
                                         Icon(Icons.Rounded.Add, contentDescription = "Crear servidor", tint = Primary)
                                     }
                                 }
                             }
                         )
                         if (selectedServer == null) {
-                            if (servers.isEmpty()) EmptyState("Aun no tienes servidores")
-                            else LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(servers, key = { it.id }) { server ->
-                                    MobileServerRow(server = server) {
-                                        serverViewModel.selectServer(server)
-                                        currentDestination = MainDestination.ServerChat(server.id)
-                                        chatViewModel.clearMessages()
-                                    }
-                                }
-                            }
+                            ServerDirectory(servers, serverState.isLoading, serverState.serversError,
+                                onRetry = serverViewModel::loadServers,
+                                onCreate = { serverViewModel.clearFeedback(); showCreateServer = true },
+                                onOpen = { server ->
+                                    serverViewModel.selectServer(server)
+                                    currentDestination = MainDestination.ServerChat(server.id)
+                                    chatViewModel.clearMessages()
+                                })
                         } else {
-                            LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp)) {
-                                item { SidebarSectionLabel("CANALES DE TEXTO") }
-                                items(channels, key = { it.id }) { channel ->
-                                    ChannelItem(
-                                        channel = channel,
-                                        isSelected = false,
-                                        onClick = {
-                                            forceScrollChatKey = "channel:${channel.id}"
-                                            serverViewModel.selectChannel(channel)
-                                        }
-                                    )
-                                }
-                            }
+                            ServerChannelBrowser(selectedServer, channels, selectedChannel?.id,
+                                serverState.isLoadingChannels, serverState.channelsError,
+                                onRetry = serverViewModel::reloadSelectedServer,
+                                onSettings = { serverViewModel.clearFeedback(); showServerSettings = true },
+                                onOpenChannel = { channel ->
+                                    forceScrollChatKey = "channel:${channel.id}"
+                                    serverViewModel.selectChannel(channel)
+                                })
                         }
                     }
                 }
@@ -595,6 +642,7 @@ fun MainScreen(
                 MobileBottomNavigation(
                     selected = mobileSection,
                     hasUnreadMessages = unreadDmIds.isNotEmpty(),
+                    hasUnreadServers = servers.any { it.unreadCount > 0 },
                     onSelect = { section ->
                         mobileSection = section
                         when (section) {
@@ -664,7 +712,7 @@ fun MainScreen(
                         selected = false,
                         onClick = {
                             serverViewModel.loadPendingInvitations()
-                            showServerInvitations = true
+                            serverViewModel.clearFeedback(); showServerInvitations = true
                         }
                     )
                 }
@@ -686,7 +734,7 @@ fun MainScreen(
                 icon = Icons.Rounded.Add,
                 contentDescription = "Crear servidor",
                 selected = false,
-                onClick = { showCreateServer = true }
+                onClick = { serverViewModel.clearFeedback(); showCreateServer = true }
             )
         }
 
@@ -724,26 +772,14 @@ fun MainScreen(
 
                 is MainDestination.ServerChat -> {
                     selectedServer?.let { server ->
-                        val canManage = server.myRole == "owner" || server.myRole == "admin"
-                        SidebarHeader(
-                            title = server.name,
-                            subtitle = roleLabel(server.myRole),
-                            action = if (canManage) "Editar" else "Servidor",
-                            onAction = { showServerSettings = true }
-                        )
-                        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                            item { SidebarSectionLabel("CANALES DE TEXTO") }
-                            items(channels, key = { it.id }) { channel ->
-                                ChannelItem(
-                                    channel = channel,
-                                    isSelected = selectedChannel?.id == channel.id,
-                                    onClick = {
-                                        forceScrollChatKey = "channel:${channel.id}"
-                                        serverViewModel.selectChannel(channel)
-                                    }
-                                )
-                            }
-                        }
+                        ServerChannelBrowser(server, channels, selectedChannel?.id,
+                            serverState.isLoadingChannels, serverState.channelsError,
+                            onRetry = serverViewModel::reloadSelectedServer,
+                            onSettings = { serverViewModel.clearFeedback(); showServerSettings = true },
+                            onOpenChannel = { channel ->
+                                forceScrollChatKey = "channel:${channel.id}"
+                                serverViewModel.selectChannel(channel)
+                            }, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -825,7 +861,14 @@ fun MainScreen(
                                 },
                             )
                         )
-                    } ?: EmptyState("Selecciona un canal")
+                    } ?: selectedServer?.let { server ->
+                        ServerWelcome(server, channels, serverMembers.size, serverState.isLoadingChannels,
+                            onSettings = { serverViewModel.clearFeedback(); showServerSettings = true },
+                            onOpen = { channel ->
+                                forceScrollChatKey = "channel:${channel.id}"
+                                serverViewModel.selectChannel(channel)
+                            })
+                    } ?: EmptyState("Selecciona un servidor")
                 }
             }
         }
@@ -891,6 +934,7 @@ fun MainScreen(
     if (showCreateServer) {
         CreateServerDialog(
             error = serverError,
+            busy = serverState.action != null,
             onDismiss = { showCreateServer = false },
             onCreate = { name, description, iconFile ->
                 serverViewModel.createServer(name, description, iconFile) {
@@ -907,6 +951,9 @@ fun MainScreen(
         ServerInvitationsDialog(
             invitations = serverInvitations,
             error = serverError,
+            busy = serverState.action != null,
+            loading = serverState.isLoadingInvitations,
+            onRetry = serverViewModel::loadPendingInvitations,
             onDismiss = { showServerInvitations = false },
             onAccept = { invitationId ->
                 serverViewModel.acceptInvitation(invitationId) { server ->
@@ -927,17 +974,28 @@ fun MainScreen(
                 serverName = server.name,
                 description = server.description.orEmpty(),
                 members = serverMembers,
+                channels = channels,
                 error = serverError,
-                onDismiss = { showServerSettings = false },
-                onSave = { name, description, iconFile ->
-                    serverViewModel.updateSelectedServer(name, description, iconFile)
+                notice = serverState.notice,
+                action = serverState.action,
+                loadingMembers = serverState.isLoadingMembers,
+                loadingChannels = serverState.isLoadingChannels,
+                channelsError = serverState.channelsError,
+                onReload = serverViewModel::reloadSelectedServer,
+                onOpenChannel = { channel ->
                     showServerSettings = false
+                    forceScrollChatKey = "channel:${channel.id}"
+                    serverViewModel.selectChannel(channel)
                 },
-                onCreateChannel = { channelName ->
-                    serverViewModel.createChannel(channelName)
+                onDismiss = { showServerSettings = false },
+                onSave = { name, description, iconFile, onSaved ->
+                    serverViewModel.updateSelectedServer(name, description, iconFile, onSaved)
                 },
-                onInvite = { username ->
-                    serverViewModel.inviteMember(username)
+                onCreateChannel = { channelName, onCreated ->
+                    serverViewModel.createChannel(channelName, onCreated)
+                },
+                onInvite = { username, onInvited ->
+                    serverViewModel.inviteMember(username, onInvited)
                 },
                 onRoleChange = { userId, role ->
                     serverViewModel.updateMemberRole(userId, role)

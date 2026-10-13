@@ -31,6 +31,17 @@ import kotlinx.serialization.json.contentOrNull
 
 class ServerApi(private val client: HttpClient) {
 
+    suspend fun getActivity(token: String): List<com.matteo.chatapp.model.ChannelActivity> =
+        client.get("$BASE_URL/api/servers/activity") { bearerAuth(token) }.body()
+
+    suspend fun markChannelRead(channelId: String, messageId: String, token: String) {
+        requireSuccess(client.post("$BASE_URL/api/servers/channels/$channelId/read") {
+            bearerAuth(token)
+            contentType(ContentType.Application.Json)
+            setBody(com.matteo.chatapp.model.ChannelReadRequest(messageId))
+        })
+    }
+
     suspend fun getMyServers(token: String): List<Server> {
         return client.get("$BASE_URL/api/servers/me") {
             bearerAuth(token)

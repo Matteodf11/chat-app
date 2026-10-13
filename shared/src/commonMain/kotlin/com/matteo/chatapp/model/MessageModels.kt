@@ -22,7 +22,8 @@ data class Message(
     val attachmentUrl: String? = null,
     val createdAt: String? = null,
     val clientMessageId: String? = null,
-    val readAt: String? = null
+    val readAt: String? = null,
+    val mentionedUserIds: List<String> = emptyList()
 )
 
 @Serializable

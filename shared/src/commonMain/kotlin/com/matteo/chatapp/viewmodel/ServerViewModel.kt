@@ -29,6 +29,12 @@ class ServerViewModel(
     private var serverEventsCollectJob: Job? = null
     private var channelsLoadJob: Job? = null
     private var membersLoadJob: Job? = null
+    private var activityJob: Job? = null
+    private var activityRefreshJob: Job? = null
+    private var activityDirty = false
+    private var activity: List<com.matteo.chatapp.model.ChannelActivity> = emptyList()
+    private val readJobs = mutableMapOf<String, Job>()
+    private val readMessages = mutableMapOf<String, String>()
 
     private val _uiState = MutableStateFlow(ServerUiState())
     val uiState: StateFlow<ServerUiState> = _uiState.asStateFlow()
@@ -40,18 +46,84 @@ class ServerViewModel(
         loadServers()
         loadPendingInvitations()
         connectServerEvents()
+        activityJob = viewModelScope.launch {
+            while (isActive) {
+                if (accessTokenProvider.currentToken() == null) break
+                refreshActivity()
+                delay(30_000)
+            }
+        }
+    }
+
+    fun refreshActivity() {
+        activityDirty = true
+        if (activityRefreshJob?.isActive == true) return
+        activityRefreshJob = viewModelScope.launch {
+            do {
+                delay(150) // Coalesce bursts of activity without repainting or reconnecting the chat.
+                activityDirty = false
+                try {
+                    activity = serverRepository.getActivity()
+                    applyActivity()
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) { /* Keep the last known counts until the connection recovers. */ }
+            } while (activityDirty)
+        }
+    }
+
+    private fun applyActivity() {
+        val byChannel = activity.associateBy { it.channelId }
+        val byServer = activity.groupBy { it.serverId }
+        fun Channel.withActivity(): Channel = byChannel[id]?.let { copy(unreadCount = it.unreadCount, mentionCount = it.mentionCount) } ?: this
+        fun Server.withActivity(): Server = byServer[id]?.let { copy(unreadCount = it.sumOf { it.unreadCount }, mentionCount = it.sumOf { it.mentionCount }) } ?: this
+        _uiState.update { state -> state.copy(
+            servers = state.servers.map { it.withActivity() },
+            channels = state.channels.map { it.withActivity() },
+            selectedServer = state.selectedServer?.withActivity(),
+            selectedChannel = state.selectedChannel?.withActivity()
+        ) }
+    }
+
+    fun markChannelRead(channelId: String, messageId: String) {
+        if (readMessages[channelId] == messageId || readJobs[channelId]?.isActive == true) return
+        readJobs[channelId] = viewModelScope.launch {
+            try {
+                serverRepository.markChannelRead(channelId, messageId)
+                readMessages[channelId] = messageId
+                refreshActivity()
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Retried while this message remains visible. */ }
+        }
+    }
+
+    fun clearFeedback() { _uiState.update { it.copy(error = null, notice = null) } }
+
+    fun reloadSelectedServer() {
+        _uiState.value.selectedServer?.let { loadChannels(it.id); loadMembers(it.id) }
+    }
+
+    private fun launchAction(action: String, block: suspend () -> Unit) {
+        if (_uiState.value.action != null) return
+        _uiState.update { it.copy(action = action, error = null, notice = null) }
+        viewModelScope.launch {
+            try { block() }
+            finally { _uiState.update { it.copy(action = null) } }
+        }
     }
 
     fun loadServers() {
+        if (_uiState.value.isLoading) return
+        _uiState.update { it.copy(isLoading = true, serversError = null) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             try {
                 val servers = serverRepository.getServers()
                 _uiState.update { it.copy(servers = servers) }
+                applyActivity()
+                refreshActivity()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // error silencioso por ahora
+                _uiState.update { it.copy(serversError = "No se pudieron cargar tus servidores") }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -59,6 +131,10 @@ class ServerViewModel(
     }
 
     fun selectServer(server: Server) {
+        if (_uiState.value.selectedServer?.id == server.id) {
+            clearSelectedChannel()
+            return
+        }
         channelsLoadJob?.cancel()
         membersLoadJob?.cancel()
         _uiState.update {
@@ -66,7 +142,8 @@ class ServerViewModel(
                 selectedServer = server,
                 selectedChannel = null,
                 channels = emptyList(),
-                members = emptyList()
+                members = emptyList(), error = null, notice = null, channelsError = null,
+                isLoadingChannels = false, isLoadingMembers = false
             )
         }
         loadChannels(server.id)
@@ -84,15 +161,21 @@ class ServerViewModel(
     private fun loadChannels(serverId: String) {
         channelsLoadJob?.cancel()
         channelsLoadJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingChannels = true, channelsError = null) }
             try {
                 val channels = serverRepository.getChannels(serverId)
                 if (_uiState.value.selectedServer?.id == serverId) {
                     _uiState.update { it.copy(channels = channels) }
+                    applyActivity()
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // error silencioso
+                if (_uiState.value.selectedServer?.id == serverId)
+                    _uiState.update { it.copy(channelsError = "No se pudieron cargar los canales") }
+            } finally {
+                if (_uiState.value.selectedServer?.id == serverId)
+                    _uiState.update { it.copy(isLoadingChannels = false) }
             }
         }
     }
@@ -101,6 +184,7 @@ class ServerViewModel(
         val targetServerId = serverId ?: return
         membersLoadJob?.cancel()
         membersLoadJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMembers = true) }
             try {
                 val members = serverRepository.getMembers(targetServerId)
                 if (_uiState.value.selectedServer?.id == targetServerId) {
@@ -112,11 +196,16 @@ class ServerViewModel(
                 if (_uiState.value.selectedServer?.id == targetServerId) {
                     _uiState.update { it.copy(error = "No se pudieron cargar los miembros") }
                 }
+            } finally {
+                if (_uiState.value.selectedServer?.id == targetServerId)
+                    _uiState.update { it.copy(isLoadingMembers = false) }
             }
         }
     }
 
     fun loadPendingInvitations() {
+        if (_uiState.value.isLoadingInvitations) return
+        _uiState.update { it.copy(isLoadingInvitations = true) }
         viewModelScope.launch {
             try {
                 val invitations = serverRepository.getPendingInvitations()
@@ -124,8 +213,8 @@ class ServerViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "No se pudieron cargar las invitaciones") }
-            }
+                _uiState.update { it.copy(error = "No se pudieron cargar las invitaciónes") }
+            } finally { _uiState.update { it.copy(isLoadingInvitations = false) } }
         }
     }
 
@@ -145,7 +234,7 @@ class ServerViewModel(
     }
 
     fun createServer(name: String, description: String, iconFile: PickedAvatarFile?, onCreated: () -> Unit = {}) {
-        viewModelScope.launch {
+        launchAction("create-server") {
             try {
                 val server = serverRepository.createServer(name, description, iconFile)
                 _uiState.update { it.copy(servers = it.servers + server, error = null) }
@@ -159,9 +248,9 @@ class ServerViewModel(
         }
     }
 
-    fun updateSelectedServer(name: String, description: String, iconFile: PickedAvatarFile?) {
+    fun updateSelectedServer(name: String, description: String, iconFile: PickedAvatarFile?, onSaved: () -> Unit = {}) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("save") {
             try {
                 val updated = serverRepository.updateServer(
                     server.id,
@@ -176,10 +265,11 @@ class ServerViewModel(
                         it.copy(
                             selectedServer = updated,
                             servers = it.servers.upsertServer(updated),
-                            error = null
+                            error = null, notice = "Cambios guardados"
                         )
                     }
                 }
+                if (_uiState.value.selectedServer?.id == server.id) onSaved()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -188,19 +278,20 @@ class ServerViewModel(
         }
     }
 
-    fun inviteMember(username: String) {
+    fun inviteMember(username: String, onInvited: () -> Unit = {}) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("invite") {
             try {
                 serverRepository.inviteMember(server.id, username)
                 if (_uiState.value.selectedServer?.id == server.id) {
-                    _uiState.update { it.copy(error = null) }
+                    _uiState.update { it.copy(error = null, notice = "Invitación enviada") }
+                    onInvited()
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (_uiState.value.selectedServer?.id == server.id) {
-                    _uiState.update { it.copy(error = "No se pudo enviar la invitacion") }
+                    _uiState.update { it.copy(error = "No se pudo enviar la invitación") }
                 }
             }
         }
@@ -208,7 +299,7 @@ class ServerViewModel(
 
     fun updateMemberRole(userId: String, role: String) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("role") {
             try {
                 val updated = serverRepository.updateMemberRole(server.id, userId, role)
                 if (_uiState.value.selectedServer?.id == server.id) {
@@ -228,7 +319,7 @@ class ServerViewModel(
 
     fun removeMember(userId: String) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("remove") {
             try {
                 serverRepository.removeMember(server.id, userId)
                 if (_uiState.value.selectedServer?.id == server.id) {
@@ -250,7 +341,7 @@ class ServerViewModel(
     }
 
     fun acceptInvitation(invitationId: String, onAccepted: (Server) -> Unit = {}) {
-        viewModelScope.launch {
+        launchAction("accept") {
             try {
                 val server = serverRepository.acceptInvitation(invitationId)
                 _uiState.update {
@@ -267,13 +358,13 @@ class ServerViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "No se pudo aceptar la invitacion") }
+                _uiState.update { it.copy(error = "No se pudo aceptar la invitación") }
             }
         }
     }
 
     fun rejectInvitation(invitationId: String) {
-        viewModelScope.launch {
+        launchAction("reject") {
             try {
                 serverRepository.rejectInvitation(invitationId)
                 _uiState.update {
@@ -287,14 +378,14 @@ class ServerViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "No se pudo rechazar la invitacion") }
+                _uiState.update { it.copy(error = "No se pudo rechazar la invitación") }
             }
         }
     }
 
     fun leaveSelectedServer(onLeft: () -> Unit = {}) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("leave") {
             try {
                 serverRepository.leaveServer(server.id)
                 removeServerAndClearSelection(server.id)
@@ -309,7 +400,7 @@ class ServerViewModel(
 
     fun deleteSelectedServer(onDeleted: () -> Unit = {}) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("delete") {
             try {
                 serverRepository.deleteServer(server.id)
                 removeServerAndClearSelection(server.id)
@@ -322,13 +413,14 @@ class ServerViewModel(
         }
     }
 
-    fun createChannel(name: String) {
+    fun createChannel(name: String, onCreated: () -> Unit = {}) {
         val server = _uiState.value.selectedServer ?: return
-        viewModelScope.launch {
+        launchAction("channel") {
             try {
                 val channel = serverRepository.createChannel(server.id, name)
                 if (_uiState.value.selectedServer?.id == server.id) {
-                    _uiState.update { it.copy(channels = it.channels + channel, error = null) }
+                    _uiState.update { it.copy(channels = (it.channels + channel).distinctBy { channel -> channel.id }, error = null, notice = "Canal creado") }
+                    onCreated()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -348,7 +440,7 @@ class ServerViewModel(
                 selectedServer = null,
                 selectedChannel = null,
                 channels = emptyList(),
-                members = emptyList()
+                members = emptyList(), isLoadingChannels = false, isLoadingMembers = false, channelsError = null
             )
         }
     }
@@ -379,6 +471,7 @@ class ServerViewModel(
         serverEventsCollectJob = viewModelScope.launch {
             serverEventsSource.events.collect { event ->
                 when (event.type) {
+                    "CHANNEL_ACTIVITY" -> refreshActivity()
                     "ROLE_UPDATED" -> {
                         val role = event.role ?: return@collect
                         _uiState.update { state ->
@@ -411,6 +504,9 @@ class ServerViewModel(
     }
 
     override fun onCleared() {
+        activityJob?.cancel()
+        activityRefreshJob?.cancel()
+        readJobs.values.forEach { it.cancel() }
         channelsLoadJob?.cancel()
         membersLoadJob?.cancel()
         serverEventsJob?.cancel()

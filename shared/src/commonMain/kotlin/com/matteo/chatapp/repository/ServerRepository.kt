@@ -12,6 +12,8 @@ import com.matteo.chatapp.platform.PickedAvatarFile
 import kotlinx.coroutines.CancellationException
 
 interface ServerRepository {
+    suspend fun getActivity(): List<com.matteo.chatapp.model.ChannelActivity> = emptyList()
+    suspend fun markChannelRead(channelId: String, messageId: String) {}
     suspend fun getServers(): List<Server>
 
     suspend fun getChannels(serverId: String): List<Channel>
@@ -56,6 +58,9 @@ class NetworkServerRepository(
     private val serverApi: ServerApi,
     private val accessTokenProvider: AccessTokenProvider
 ) : ServerRepository {
+    override suspend fun getActivity() = serverApi.getActivity(accessTokenProvider.requireToken())
+    override suspend fun markChannelRead(channelId: String, messageId: String) =
+        serverApi.markChannelRead(channelId, messageId, accessTokenProvider.requireToken())
     override suspend fun getServers(): List<Server> =
         serverApi.getMyServers(accessTokenProvider.requireToken())
 

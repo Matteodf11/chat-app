@@ -68,6 +68,11 @@ actual suspend fun saveAttachment(url: String, fileName: String): Boolean {
 
 actual fun supportsCurrentLocation(): Boolean = true
 
+actual fun openLocationSettings() {
+    AndroidPlatform.context.startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
 actual suspend fun currentLocation(): SharedLocation {
     check(AndroidAttachmentActions.permission()) { "Permiso de ubicación denegado. Puedes introducir las coordenadas." }
     val manager = AndroidPlatform.context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
