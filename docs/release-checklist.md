@@ -6,7 +6,7 @@ cerrada hasta completar las comprobaciones manuales pendientes.
 | Comprobación | Estado y evidencia |
 | --- | --- |
 | Pruebas del cliente | 104 pruebas pasan en el último recorrido local |
-| Pruebas del backend | 57 pruebas pasan en el recorrido previo al commit e9e4bcd |
+| Pruebas del backend | 57 pruebas pasan localmente; comprobaciones remotas correctas en a478f34 |
 | APK debug y MSI | Compilación local correcta de 1.1.1 |
 | Captura básica con webcam en PC | Confirmada por el usuario |
 | Menciones por clic/Tab y contadores combinados | Implementados; clic y contadores confirmados durante las iteraciones |
@@ -18,7 +18,7 @@ cerrada hasta completar las comprobaciones manuales pendientes.
 | Cortar/restaurar red y reintentar sin duplicados | Pruebas automáticas; recorrido final con dispositivos pendiente |
 | Recuperar borrador y cola pendiente tras reinicio | Pruebas automáticas; recorrido final con dispositivos pendiente |
 | Notificaciones, apertura del chat y cierre a bandeja | Pendiente de recorrido final con instalador |
-| GitHub Actions del cliente | Workflow preparado; ejecución remota pendiente de subir los cambios |
+| GitHub Actions del cliente | Pruebas, APK, MSI y empaquetado correctos en [la ejecución de 1bf801d](https://github.com/Matteodf11/chat-app/actions/runs/38452367482) |
 | Capturas y vídeo reales para README/demo | Pendientes; no sustituir por maquetas |
 | Recuperación por correo | Aplazada por decisión del usuario hasta cerrar escritorio |
 
