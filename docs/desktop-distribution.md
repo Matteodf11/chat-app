@@ -6,7 +6,7 @@ Generar el instalador desde la raíz del proyecto:
 .\gradlew.bat :desktopApp:packageMsi --console=plain
 ```
 
-El archivo resultante es `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.2.msi`.
+El archivo resultante es `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.3.msi`.
 Se puede compartir ese MSI directamente. Incluye el entorno Java necesario;
 el destinatario no necesita instalar Java. Se instala para el usuario actual,
 permite elegir carpeta y añade acceso al menú Inicio y al escritorio.
@@ -45,3 +45,8 @@ Probar después una actualización con versión superior y el mismo `upgradeUuid
 
 La versión 1.1.2 carga las notas de voz al pulsar reproducir y libera el audio
 al abandonar el chat. Android usa también 1.1.2 y versionCode = 4.
+
+La versión 1.1.3 corrige la apertura del selector de foto de perfil, portada e
+icono de servidor en Windows: el diálogo nativo y la lectura se ejecutan fuera
+del contexto de Compose, el selector se libera al cerrarlo y la lectura está
+limitada a 2 MB. Android usa también 1.1.3 y versionCode = 5.

@@ -130,9 +130,9 @@ El APK debug se genera en:
 androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
-El MSI se genera en `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.2.msi`.
+El MSI se genera en `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.3.msi`.
 El script de empaquetado comprueba las versiones internas del APK y MSI y crea
-`build/release/Chimera-1.1.2-demo.zip`, con guía y sumas SHA-256. Estas sumas permiten
+`build/release/Chimera-1.1.3-demo.zip`, con guía y sumas SHA-256. Estas sumas permiten
 comprobar integridad; no sustituyen una firma digital. El empaquetado se ejecuta
 en Windows y necesita el Android SDK utilizado para compilar.
 El cliente se ejecuta también como JVM en macOS/Linux, pero la captura de webcam,
@@ -145,7 +145,7 @@ Windows. No se publica una aplicación para iPhone.
 .\gradlew.bat :shared:jvmTest
 ```
 
-Las 112 pruebas del recorrido local de 1.1.2 cubren estado, autenticación,
+Las 118 pruebas del recorrido local de 1.1.3 cubren estado, autenticación,
 reintentos, borradores, caché, menciones, entrada de ubicación, cierre del proceso
 de localización, ciclo de vida de cámara y reproducción de audio, entre otros casos. Los tests de
 hardware usan dobles: no certifican webcam, micrófono o localización reales.
