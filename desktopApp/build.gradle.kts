@@ -22,10 +22,10 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Chimera"
-            packageVersion = "1.1.4"
+            packageVersion = "1.1.5"
             description = "Chimera - Mensajes, amigos y comunidades"
             vendor = "Chimera"
-            modules("java.instrument", "java.management", "java.net.http", "java.prefs", "jdk.crypto.ec", "jdk.unsupported")
+            modules("java.instrument", "java.management", "java.net.http", "java.prefs", "jdk.crypto.ec", "jdk.unsupported", "jdk.httpserver")
             windows {
                 iconFile.set(project.file("src/main/resources/chimera.ico"))
                 perUserInstall = true

@@ -28,7 +28,23 @@ internal fun LocationShareDialog(onDismiss: () -> Unit, onSend: (String) -> Unit
     var error by remember { mutableStateOf<String?>(null) }
     var locationJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    val mapSelection = supportsLocationMap()
     val point = remember(input) { locationFromInput(input) }
+    fun selectLocation(automatic: Boolean) {
+        locating = true; error = null
+        locationJob = scope.launch {
+            try {
+                val value = if (automatic) currentLocation() else chooseLocationOnMap(point)
+                if (value != null) input = "${value.latitude}, ${value.longitude}"
+            } catch (_: TimeoutCancellationException) {
+                manual = true
+                error = if (mapSelection) "La selección ha caducado. Vuelve a abrir el mapa para elegir un punto."
+                    else "No se pudo obtener la ubicación a tiempo. Revisa los permisos o elige otro lugar."
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { manual = true; error = e.message ?: "No se pudo obtener la ubicación" }
+            finally { locating = false }
+        }
+    }
     fun openMap(url: String) {
         runCatching { openExternalUrl(url) }.onFailure { error = "No se pudo abrir el navegador para comprobar el punto." }
     }
@@ -43,25 +59,21 @@ internal fun LocationShareDialog(onDismiss: () -> Unit, onSend: (String) -> Unit
                 IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Cerrar") }
             }
             Text("Elige un punto y compruébalo antes de enviarlo. Se comparte un lugar fijo, no tu ubicación en tiempo real.")
-            if (supportsCurrentLocation()) OutlinedButton(enabled = !locating, modifier = Modifier.fillMaxWidth(), onClick = {
-                locating = true; error = null
-                locationJob = scope.launch {
-                    try { val value = currentLocation(); input = "${value.latitude}, ${value.longitude}" }
-                    catch (_: TimeoutCancellationException) { manual = true; error = "No se pudo obtener la ubicación a tiempo. Puedes pegar unas coordenadas o un enlace." }
-                    catch (e: CancellationException) { throw e }
-                    catch (e: Exception) { manual = true; error = e.message ?: "No se pudo obtener la ubicación" }
-                    finally { locating = false }
-                }
-            }) { Text("Usar mi ubicación") }
+            if (mapSelection) Text("Se abrirá un mapa en tu navegador. Puedes permitir la ubicación o marcar un punto con el ratón.",
+                style = MaterialTheme.typography.bodyMedium)
+            if (supportsCurrentLocation()) OutlinedButton(enabled = !locating, modifier = Modifier.fillMaxWidth(),
+                onClick = { selectLocation(true) }) { Text("Usar mi ubicación") }
+            if (mapSelection) OutlinedButton(enabled = !locating, modifier = Modifier.fillMaxWidth(),
+                onClick = { selectLocation(false) }) { Text(if (point == null) "Elegir un punto en el mapa" else "Cambiar punto en el mapa") }
             if (locating) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp)); Text("Buscando ubicación…", Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp)); Text(if (mapSelection) "Selecciona el punto en el navegador" else "Buscando ubicación…", Modifier.weight(1f))
                 TextButton(onClick = { locationJob?.cancel() }) { Text("Cancelar") }
             }
-            if (supportsCurrentLocation()) TextButton(enabled = !locating, onClick = { manual = !manual }) {
+            if (!mapSelection && supportsCurrentLocation()) TextButton(enabled = !locating, onClick = { manual = !manual }) {
                 Text(if (manual) "Ocultar selección manual" else "Elegir otro lugar")
             }
-            if (manual) {
+            if (manual && !mapSelection) {
                 OutlinedTextField(input, { input = it.take(2048); error = null }, enabled = !locating,
                     label = { Text("Coordenadas o enlace de Google Maps") },
                     placeholder = { Text("38.345, -0.481") }, maxLines = 3, modifier = Modifier.fillMaxWidth(),
@@ -79,7 +91,7 @@ internal fun LocationShareDialog(onDismiss: () -> Unit, onSend: (String) -> Unit
                 }
             } }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (error != null && supportsCurrentLocation()) TextButton(onClick = {
+            if (error != null && supportsCurrentLocation() && !mapSelection) TextButton(onClick = {
                 runCatching { openLocationSettings() }.onFailure { error = "Abre los ajustes de ubicación de tu dispositivo y comprueba los permisos." }
             }) { Text("Abrir ajustes de ubicación") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

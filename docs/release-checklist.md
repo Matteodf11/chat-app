@@ -1,19 +1,19 @@
-# Candidato de demostración 1.1.4
+# Candidato de demostración 1.1.5
 
 La versión tiene funciones implementadas y paquetes locales. No se declara
 cerrada hasta completar las comprobaciones manuales pendientes.
 
 | Comprobación | Estado y evidencia |
 | --- | --- |
-| Pruebas del cliente | 118 pruebas pasan en el último recorrido local |
+| Pruebas del cliente | 120 pruebas Kotlin y 6 pruebas JavaScript pasan en el último recorrido local |
 | Pruebas del backend | 57 pruebas pasan localmente; comprobaciones remotas correctas en a478f34 |
-| APK debug y MSI | Compilación local correcta de 1.1.4 |
+| APK debug y MSI | Compilación local correcta de 1.1.5 |
 | Captura básica con webcam en PC | Confirmada por el usuario |
 | Menciones por clic/Tab y contadores combinados | Implementados; clic y contadores confirmados durante las iteraciones |
-| Ubicación automática en Windows | Implementada y cubierta con proveedor falso; prueba real pendiente |
+| Ubicación y selección en mapa en PC | Puente local y lógica del mapa probados; navegador real y permisos pendientes |
 | Cancelar, cambiar webcam y desconexión de hardware | Casos de sesión probados con cámaras falsas; prueba real pendiente |
 | Instalar en un equipo sin Java | Pendiente |
-| Actualizar el MSI anterior a 1.1.4 | Pendiente |
+| Actualizar el MSI anterior a 1.1.5 | Pendiente |
 | Enviar/recibir texto, fotos y voz Android ↔ Windows | Pendiente de recorrido final documentado con dos cuentas |
 | Audio bajo demanda y cierre al salir del chat | Ocho pruebas de escritorio con proveedor falso; reproducción con dispositivos reales pendiente |
 | Selector de perfil, portada e icono de servidor en Windows | Seis pruebas con selector simulado: interfaz disponible, cancelación y límites de lectura; apertura nativa real pendiente |

@@ -13,7 +13,7 @@ manuales de hardware ni funciones todavía no implementadas.
 | Fotos múltiples, revisión, visor y descarga | Implementaciones en ambas plataformas | Probar selección, cancelación y archivos grandes desde el instalador |
 | Notas de voz | Android y JVM graban WAV; ambos tienen reproducción | Comprobar micrófono, reproducción cruzada y liberación de recursos |
 | Cámara | Android captura; Windows tiene captura integrada con selector y vista previa | Validar webcam real, errores de acceso y liberación desde el MSI; ver desktop-camera.md |
-| Ubicación | Android mantiene su proveedor; Windows añade búsqueda automática y ambos aceptan coordenadas/enlaces | Validar Windows con y sin permisos/proveedor, cancelación y envío cruzado; ver location-sharing.md |
+| Ubicación | Android mantiene su proveedor; PC selecciona un punto en el mapa del navegador, con ubicación opcional mediante permiso | Validar navegador con y sin permisos, marcador, cancelación y envío cruzado; ver location-sharing.md |
 | Compartir imágenes | Android usa compartir del sistema; JVM copia imagen y archivo al portapapeles | Verificar el comportamiento en Windows y documentar la adaptación |
 | Notificaciones | Android tiene avisos locales; Windows conserva los indicadores internos y la bandeja, sin avisos externos | Probar indicadores y cierre a bandeja con el MSI; avisos del sistema en Android |
 

@@ -67,6 +67,8 @@ actual suspend fun saveAttachment(url: String, fileName: String): Boolean {
 }
 
 actual fun supportsCurrentLocation(): Boolean = true
+actual fun supportsLocationMap(): Boolean = false
+actual suspend fun chooseLocationOnMap(initial: SharedLocation?): SharedLocation? = null
 
 actual fun openLocationSettings() {
     AndroidPlatform.context.startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)

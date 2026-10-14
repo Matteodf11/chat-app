@@ -22,6 +22,12 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test map selection and location permission handling
+        run: node --test scripts/location-map.test.cjs
       - name: Install Android SDK components
         run: '& "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" "platforms;android-36" "build-tools;36.0.0"'
       - name: Test client and build Windows and Android packages

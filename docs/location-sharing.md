@@ -1,49 +1,58 @@
 # Compartir ubicación
 
-La versión 1.1.1 permite usar la ubicación de Windows desde Adjuntar → Ubicación.
-La búsqueda comienza únicamente al pulsar «Usar mi ubicación». Usa
-GeoCoordinateWatcher de System.Device mediante Windows PowerShell, con un script
-fijo empaquetado en el cliente. No necesita una clave de API adicional, no utiliza
-servicios de geolocalización por IP y no cambia los permisos del sistema.
+Desde 1.1.5, PC abre un mapa interactivo en el navegador desde Adjuntar → Ubicación.
+Se ha sustituido el proveedor antiguo de Windows y se ha retirado del panel de
+PC el campo para pegar coordenadas o texto.
 
-Windows debe tener un proveedor y permitir el acceso a la ubicación. Los equipos
-sin proveedor disponible muestran una alternativa manual. El punto puede ser
-aproximado, por lo que se muestra antes de enviarlo con una acción para abrirlo
-en el navegador. Solo «Enviar ubicación» crea un mensaje; no hay seguimiento en
-tiempo real ni envío automático al finalizar la búsqueda.
+- «Usar mi ubicación» abre el mapa y solicita permiso mediante el navegador.
+- «Elegir un punto en el mapa» permite navegar, ampliar y pulsar un lugar, o
+  arrastrar el marcador. La vista inicial no cuenta como selección.
+- «Usar este punto» devuelve la selección a Chimera. Después hay que pulsar
+  «Enviar ubicación» en la app. No se envían mensajes desde el navegador.
 
-El panel permite pegar coordenadas como `38.345, -0.481` o, con decimales españoles,
-`38,345; -0,481`. También acepta enlaces HTTPS de Google Maps que contengan un
-par de coordenadas en `query` o `q`. Se genera un enlace canónico a partir del
-punto validado; nunca se abre el enlace original introducido por el usuario.
-No se resuelven enlaces cortos, direcciones de texto ni el centro de un mapa
-contenido en una URL `/@...`, que puede ser distinto del lugar seleccionado.
+Si el navegador no obtiene la posición o se deniega el permiso, el mapa sigue
+permitiendo elegir un lugar. La precisión depende del navegador, el dispositivo
+y sus permisos; este cambio no garantiza que todos los equipos puedan localizarse.
+No hay seguimiento en tiempo real ni se utiliza una estimación por IP propia.
 
-La consulta de Windows tiene un límite de 20 segundos en el proveedor y de
-30 segundos en el cliente. La cancelación o el cierre del diálogo terminan el
-proceso auxiliar y liberan los recursos. No se registra su salida, que contiene
-las coordenadas. El script no interpola ninguna entrada del usuario. Las
-operaciones bloqueantes se ejecutan fuera del hilo de la interfaz y el proceso
-auxiliar se inicia sin ventana de terminal.
+El mapa utiliza Leaflet 1.9.4 y teselas de OpenStreetMap mediante HTTPS. Necesita
+Internet, pero no requiere cuenta ni clave de mapas. Se mantiene la atribución
+visible y la caché normal del navegador, sin descargas masivas. La página informa
+si no puede cargar el mapa. Los proveedores externos reciben las solicitudes de
+sus recursos; las coordenadas seleccionadas vuelven al cliente por una conexión
+local y no se envían al backend hasta confirmar el mensaje en Chimera.
 
-Android conserva su proveedor nativo, con el mismo panel de revisión y elección
-manual. El botón de ajustes abre la configuración del dispositivo; el usuario
-decide si desea cambiar sus permisos.
+La página se sirve solo en 127.0.0.1, con puerto aleatorio, ruta temporal y token
+por selección. La devolución valida origen, token, tamaño y coordenadas finitas.
+No acepta solicitudes de otros sitios ni permite reutilizar una selección.
+Cancelar, cerrar el diálogo de Chimera o agotar cinco minutos libera el servidor.
+Cerrar solo la pestaña no devuelve un punto: se puede cancelar desde Chimera.
+El runtime del MSI incluye jdk.httpserver; no requiere instalar Node.js o Java.
+
+Android conserva su proveedor nativo y su entrada alternativa de coordenadas o
+enlaces de Google Maps con un punto explícito. Ambos clientes envían el mismo
+formato y muestran una acción «Ver en el mapa» en el chat.
 
 ## Verificación
 
-Pruebas automáticas: formatos de coordenadas, validación de rangos y valores no
-finitos, enlaces permitidos y rechazados, respuestas de Windows, cancelación,
-espera agotada y cierre del proceso. La sintaxis del script y la disponibilidad
-de System.Device se han comprobado sin solicitar la posición del equipo.
+Seis pruebas Kotlin usan solicitudes HTTP locales reales para validar devolución,
+cancelación, aislamiento, errores y cierre del listener. Seis pruebas JavaScript
+cubren selección manual, confirmación, permiso denegado, cancelación, error de
+carga y una respuesta de ubicación tardía que no debe reemplazar la selección.
+No solicitan la ubicación real de ningún dispositivo.
 
-Pendiente de prueba manual: localizar con permisos activados, denegarlos y
-reintentar desde ajustes, cancelar una búsqueda, cerrar el diálogo durante la
-consulta, abrir el punto en el mapa y enviarlo entre Windows y Android. Probar
-también un PC sin proveedor y los ejemplos manuales. La precisión real depende
-del dispositivo y no está certificada por las pruebas con procesos falsos.
+```powershell
+.\gradlew.bat :shared:jvmTest
+node --test scripts/location-map.test.cjs
+```
 
-Referencias de Microsoft:
-- [GeoCoordinateWatcher](https://learn.microsoft.com/en-us/dotnet/api/system.device.location.geocoordinatewatcher?view=netframework-4.8.1)
-- [TryStart](https://learn.microsoft.com/en-us/dotnet/api/system.device.location.geocoordinatewatcher.trystart?view=netframework-4.8.1)
-- [Ubicación y privacidad de Windows](https://support.microsoft.com/en-us/windows/privacy/windows-location-service-and-privacy)
+Las pruebas JavaScript necesitan Node.js 24 en desarrollo y también corren en CI;
+no añaden dependencias npm. La comprobación visual con el navegador de herramientas
+no pudo acceder al servidor local del equipo. Queda comprobar en el navegador
+real del usuario: carga del mapa, permiso concedido/denegado, arrastre del marcador,
+regreso a Chimera, envío Android ↔ Windows y cancelación desde la app.
+
+Referencias:
+
+- [Leaflet: guía de inicio](https://leafletjs.com/examples/quick-start/)
+- [OpenStreetMap: política de teselas](https://operations.osmfoundation.org/policies/tiles/)

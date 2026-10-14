@@ -132,9 +132,9 @@ El APK debug se genera en:
 androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
-El MSI se genera en `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.4.msi`.
+El MSI se genera en `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.5.msi`.
 El script de empaquetado comprueba las versiones internas del APK y MSI y crea
-`build/release/Chimera-1.1.4-demo.zip`, con guía y sumas SHA-256. Estas sumas permiten
+`build/release/Chimera-1.1.5-demo.zip`, con guía y sumas SHA-256. Estas sumas permiten
 comprobar integridad; no sustituyen una firma digital. El empaquetado se ejecuta
 en Windows y necesita el Android SDK utilizado para compilar.
 El cliente se ejecuta también como JVM en macOS/Linux, pero la captura de webcam,
@@ -145,12 +145,18 @@ Windows. No se publica una aplicación para iPhone.
 
 ```powershell
 .\gradlew.bat :shared:jvmTest
+node --test scripts/location-map.test.cjs
 ```
 
-Las 118 pruebas del recorrido local de 1.1.4 cubren estado, autenticación,
-reintentos, borradores, caché, menciones, entrada de ubicación, cierre del proceso
-de localización, ciclo de vida de cámara y reproducción de audio, entre otros casos. Los tests de
+Las 120 pruebas Kotlin del recorrido local de 1.1.5 cubren estado, autenticación,
+reintentos, borradores, caché, menciones, entrada de ubicación, puente local
+del mapa, ciclo de vida de cámara y reproducción de audio, entre otros casos. Los tests de
 hardware usan dobles: no certifican webcam, micrófono o localización reales.
+
+Las seis pruebas JavaScript adicionales verifican la selección de ubicación en
+el mapa. Requieren Node.js 24 solo en desarrollo y CI; no hay dependencias npm.
+En PC, elegir ubicación abre el navegador y devuelve el punto a Chimera para
+revisarlo y enviarlo, sin introducir coordenadas como texto en el panel.
 
 El workflow `Client checks` construye APK/MSI y guarda los informes y paquetes
 como artefactos de GitHub Actions durante 14 días. El resultado de cada commit

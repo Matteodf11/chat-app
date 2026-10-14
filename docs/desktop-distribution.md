@@ -6,7 +6,7 @@ Generar el instalador desde la raíz del proyecto:
 .\gradlew.bat :desktopApp:packageMsi --console=plain
 ```
 
-El archivo resultante es `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.4.msi`.
+El archivo resultante es `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.5.msi`.
 Se puede compartir ese MSI directamente. Incluye el entorno Java necesario;
 el destinatario no necesita instalar Java. Se instala para el usuario actual,
 permite elegir carpeta y añade acceso al menú Inicio y al escritorio.
@@ -54,3 +54,8 @@ limitada a 2 MB. Android usa también 1.1.3 y versionCode = 5.
 La versión 1.1.4 elimina los avisos externos en Windows. Conserva los indicadores
 internos y la bandeja para abrir y salir de Chimera. Android conserva sus avisos
 locales y usa también 1.1.4, con versionCode = 6.
+
+La versión 1.1.5 sustituye la consulta antigua de Windows por un mapa en el
+navegador: ubicación con permiso o selección de un punto con el ratón, seguida
+de revisión y envío en Chimera. Incluye jdk.httpserver en el runtime del MSI.
+Corrige también textos de registro y perfiles. Android usa 1.1.5 y versionCode = 7.

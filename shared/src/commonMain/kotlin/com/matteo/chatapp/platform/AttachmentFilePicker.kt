@@ -50,6 +50,8 @@ expect suspend fun shareImage(url: String, fileName: String, contentType: String
 expect fun supportsCurrentLocation(): Boolean
 expect suspend fun currentLocation(): SharedLocation
 expect fun openLocationSettings()
+expect fun supportsLocationMap(): Boolean
+expect suspend fun chooseLocationOnMap(initial: SharedLocation? = null): SharedLocation?
 
 data class SharedLocation(val latitude: Double, val longitude: Double) {
     init {

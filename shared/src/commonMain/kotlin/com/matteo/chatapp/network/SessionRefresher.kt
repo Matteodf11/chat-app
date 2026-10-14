@@ -27,7 +27,7 @@ object SessionRefresher {
 
     private suspend fun refreshLocked(): String {
         val refreshToken = SessionManager.getRefreshToken()
-            ?: throw IllegalStateException("No hay una sesion renovable")
+            ?: throw IllegalStateException("No hay una sesión renovable")
         val response = AuthApi(refreshClient).refresh(refreshToken)
         SessionManager.updateTokens(response.token, response.refreshToken)
         SessionManager.saveSession(response.token, response.username, response.email)

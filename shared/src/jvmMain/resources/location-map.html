@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Elegir ubicación · Chimera</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#111;color:#eee;font:16px system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column}
+header,footer{padding:16px 24px;background:#1b1b1b}h1{font-size:22px;margin:0 0 6px}p{margin:6px 0;color:#bbb}
+#map{flex:1;min-height:240px}footer{display:flex;gap:14px;align-items:center;flex-wrap:wrap}#status{flex:1;min-width:240px}
+button{font:inherit;border:1px solid #555;border-radius:12px;padding:11px 17px;background:#252525;color:#eee;cursor:pointer}
+button.primary{background:#416ce0;border-color:#416ce0}button:disabled{opacity:.45;cursor:default}button:focus-visible{outline:3px solid #8daeff;outline-offset:3px}
+.leaflet-control-attribution{font-size:12px}@media(max-width:600px){header,footer{padding:12px}h1{font-size:19px}}
+</style></head><body>
+<header><h1>Elegir ubicación</h1><p>Pulsa en el mapa o arrastra el marcador. Después vuelve a Chimera para revisar y enviar el punto.</p>
+<button id="locate" type="button">Usar mi ubicación</button></header>
+<div id="map" aria-label="Mapa para elegir un punto"></div>
+<footer><div id="status" role="status" aria-live="polite">Selecciona un punto. La vista inicial no representa tu ubicación.</div>
+<button id="cancel" type="button">Cancelar</button><button id="confirm" class="primary" type="button" disabled>Usar este punto</button></footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+'use strict';
+const status = document.getElementById('status'), confirmButton = document.getElementById('confirm');
+const cancelButton = document.getElementById('cancel'), locateButton = document.getElementById('locate');
+let selected = null, marker = null, finished = false, selecting = false, locating = false, userChoice = 0;
+async function submit(body) {
+  if (selecting || finished) return;
+  selecting = true; confirmButton.disabled = true; cancelButton.disabled = true;
+  try {
+    const response = await fetch('select', {method:'POST', headers:{'Content-Type':'text/plain','X-Chimera-Selection':'__TOKEN__'}, body});
+    if (!response.ok) throw new Error();
+    finished = true; locateButton.disabled = true;
+    status.textContent = body === 'cancel' ? 'Selección cancelada. Puedes cerrar esta pestaña.' : 'Punto elegido. Vuelve a Chimera para revisarlo y enviarlo. Puedes cerrar esta pestaña.';
+  } catch (_) {
+    status.textContent = 'No se pudo devolver el punto. Comprueba que Chimera sigue abierta y vuelve a abrir el selector desde la app.';
+    confirmButton.disabled = selected === null; cancelButton.disabled = false;
+  } finally { selecting = false; }
+}
+cancelButton.onclick = () => submit('cancel');
+confirmButton.onclick = () => { if (selected) return submit(selected.lat + '|' + selected.lng); };
+if (typeof L === 'undefined') {
+  status.textContent = 'No se pudo cargar el mapa. Revisa la conexión a Internet y vuelve a abrirlo desde Chimera.';
+  locateButton.disabled = true;
+} else {
+  const map = L.map('map').setView([__LATITUDE__, __LONGITUDE__], __HAS_SELECTION__ ? 15 : 5);
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  tiles.on('tileerror', () => { if (!selected) status.textContent = 'No se pudieron cargar partes del mapa. Comprueba la conexión.'; });
+  function select(point) {
+    if (finished || selecting) return;
+    const wrapped = L.latLng(point.lat, point.lng).wrap();
+    if (Math.abs(wrapped.lat) > 90) return;
+    selected = wrapped;
+    if (marker) marker.setLatLng(wrapped);
+    else {
+      marker = L.marker(wrapped, {draggable:true}).addTo(map);
+      marker.on('dragend', () => { userChoice++; select(marker.getLatLng()); });
+    }
+    confirmButton.disabled = false;
+    status.textContent = 'Punto seleccionado: ' + wrapped.lat.toFixed(6) + ', ' + wrapped.lng.toFixed(6) + '. Comprueba el marcador antes de continuar.';
+  }
+  map.on('click', event => { userChoice++; select(event.latlng); });
+  function locate() {
+    if (locating || finished) return;
+    if (!navigator.geolocation) { status.textContent = 'Este navegador no ofrece ubicación. Puedes marcar el punto en el mapa.'; return; }
+    locating = true; locateButton.disabled = true;
+    const choiceAtStart = userChoice;
+    status.textContent = 'Esperando permiso y ubicación del navegador…';
+    navigator.geolocation.getCurrentPosition(position => {
+      locating = false; locateButton.disabled = finished;
+      if (finished || choiceAtStart !== userChoice) return;
+      select({lat:position.coords.latitude, lng:position.coords.longitude});
+      map.setView(selected, 16);
+      L.circle(selected, {radius:Math.min(position.coords.accuracy, 10000)}).addTo(map);
+      status.textContent += ' Precisión aproximada: ' + Math.round(position.coords.accuracy) + ' m.';
+    }, error => {
+      locating = false; locateButton.disabled = finished;
+      if (finished || choiceAtStart !== userChoice) return;
+      status.textContent = error.code === 1 ? 'Permiso de ubicación denegado. Puedes permitirlo en el navegador o marcar el punto en el mapa.' : 'El navegador no pudo localizar el equipo. Puedes marcar el punto en el mapa o reintentar.';
+    }, {enableHighAccuracy:true, timeout:20000, maximumAge:60000});
+  }
+  locateButton.onclick = locate;
+  if (__HAS_SELECTION__) select({lat:__LATITUDE__, lng:__LONGITUDE__});
+  if (__LOCATE__) locate();
+}
+</script></body></html>

@@ -182,7 +182,7 @@ fun PendingList(
             items(incoming) { request ->
                 RequestRow(
                     request = request,
-                    detail = "Quiere anadirte como amigo",
+                    detail = "Quiere añadirte como amigo",
                     primaryAction = "Aceptar",
                     secondaryAction = "Rechazar",
                     onPrimary = { onAccept(request.id) },
@@ -221,7 +221,7 @@ fun AddFriendTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Anadir amigo", color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Añadir amigo", color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("Busca por nombre de usuario.", color = OnSurface, fontSize = 13.sp)
         }
 

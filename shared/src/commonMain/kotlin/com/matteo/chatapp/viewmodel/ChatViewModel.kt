@@ -485,7 +485,7 @@ class ChatViewModel(
                 _searchState.update {
                     it.copy(
                         results = emptyList(),
-                        error = e.message?.takeIf(String::isNotBlank) ?: "No se pudo completar la busqueda"
+                        error = e.message?.takeIf(String::isNotBlank) ?: "No se pudo completar la búsqueda"
                     )
                 }
             } finally {

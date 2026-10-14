@@ -122,7 +122,7 @@ fun LoginScreen(
             }
             Spacer(Modifier.height(22.dp))
             Text(
-                text = if (isRegisterMode) "Crear cuenta" else "Iniciar sesion",
+                text = if (isRegisterMode) "Crear cuenta" else "Iniciar sesión",
                 color = OnBackground,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
@@ -148,7 +148,7 @@ fun LoginScreen(
                 AuthField(
                     value = password,
                     onValueChange = { password = it },
-                    label = "Contrasena",
+                    label = "Contraseña",
                     keyboardType = KeyboardType.Password,
                     isPassword = true,
                     onSubmit = submitAuth
