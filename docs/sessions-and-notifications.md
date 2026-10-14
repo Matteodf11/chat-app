@@ -16,15 +16,17 @@ de renovación invalida la sesión.
 
 ## Notificaciones locales
 
-Los mensajes directos recibidos por WebSocket producen avisos del sistema
+En Android, los mensajes directos recibidos por WebSocket producen avisos del sistema
 cuando la aplicación no está en primer plano. No se notifican mensajes propios,
 ediciones, eliminaciones ni entregas duplicadas recientes. Pulsar el aviso abre
 la conversación cuando la sesión y la lista de conversaciones están disponibles.
 
-En escritorio se utiliza la bandeja del sistema. La X oculta la ventana si la
+En escritorio no se muestran avisos del sistema. Se conservan los indicadores
+internos de mensajes sin leer y menciones. La bandeja permite abrir y salir de
+Chimera; abrirla recupera la ventana sin cambiar la conversación seleccionada.
+La X oculta la ventana si la
 bandeja está disponible; «Abrir Chimera» la recupera y «Salir» termina el proceso.
-Si no hay bandeja disponible, la X termina la aplicación. Se necesita mantener
-el proceso activo y tener conexión para recibir estos avisos.
+Si no hay bandeja disponible, la X termina la aplicación.
 
 En Android se crea el canal «Mensajes directos» y se solicita POST_NOTIFICATIONS
 una vez al iniciar sesión en Android 13 o posterior. Los permisos y sonidos

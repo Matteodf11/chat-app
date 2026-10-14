@@ -15,7 +15,7 @@ manuales de hardware ni funciones todavía no implementadas.
 | Cámara | Android captura; Windows tiene captura integrada con selector y vista previa | Validar webcam real, errores de acceso y liberación desde el MSI; ver desktop-camera.md |
 | Ubicación | Android mantiene su proveedor; Windows añade búsqueda automática y ambos aceptan coordenadas/enlaces | Validar Windows con y sin permisos/proveedor, cancelación y envío cruzado; ver location-sharing.md |
 | Compartir imágenes | Android usa compartir del sistema; JVM copia imagen y archivo al portapapeles | Verificar el comportamiento en Windows y documentar la adaptación |
-| Notificaciones | Android y JVM tienen implementaciones; Windows usa bandeja del sistema | Probar recepción, apertura de conversación y cierre a bandeja con el MSI |
+| Notificaciones | Android tiene avisos locales; Windows conserva los indicadores internos y la bandeja, sin avisos externos | Probar indicadores y cierre a bandeja con el MSI; avisos del sistema en Android |
 
 La equivalencia debe cubrir los casos de uso. Un PC sin webcam o sin servicio
 de ubicación necesita una alternativa clara. No basta con habilitar un botón

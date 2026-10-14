@@ -1,4 +1,4 @@
-# Candidato de demostración 1.1.3
+# Candidato de demostración 1.1.4
 
 La versión tiene funciones implementadas y paquetes locales. No se declara
 cerrada hasta completar las comprobaciones manuales pendientes.
@@ -7,19 +7,19 @@ cerrada hasta completar las comprobaciones manuales pendientes.
 | --- | --- |
 | Pruebas del cliente | 118 pruebas pasan en el último recorrido local |
 | Pruebas del backend | 57 pruebas pasan localmente; comprobaciones remotas correctas en a478f34 |
-| APK debug y MSI | Compilación local correcta de 1.1.3 |
+| APK debug y MSI | Compilación local correcta de 1.1.4 |
 | Captura básica con webcam en PC | Confirmada por el usuario |
 | Menciones por clic/Tab y contadores combinados | Implementados; clic y contadores confirmados durante las iteraciones |
 | Ubicación automática en Windows | Implementada y cubierta con proveedor falso; prueba real pendiente |
 | Cancelar, cambiar webcam y desconexión de hardware | Casos de sesión probados con cámaras falsas; prueba real pendiente |
 | Instalar en un equipo sin Java | Pendiente |
-| Actualizar el MSI anterior a 1.1.3 | Pendiente |
+| Actualizar el MSI anterior a 1.1.4 | Pendiente |
 | Enviar/recibir texto, fotos y voz Android ↔ Windows | Pendiente de recorrido final documentado con dos cuentas |
 | Audio bajo demanda y cierre al salir del chat | Ocho pruebas de escritorio con proveedor falso; reproducción con dispositivos reales pendiente |
 | Selector de perfil, portada e icono de servidor en Windows | Seis pruebas con selector simulado: interfaz disponible, cancelación y límites de lectura; apertura nativa real pendiente |
 | Cortar/restaurar red y reintentar sin duplicados | Pruebas automáticas; recorrido final con dispositivos pendiente |
 | Recuperar borrador y cola pendiente tras reinicio | Pruebas automáticas; recorrido final con dispositivos pendiente |
-| Notificaciones, apertura del chat y cierre a bandeja | Pendiente de recorrido final con instalador |
+| Indicadores internos, ausencia de avisos externos y cierre a bandeja en Windows | Pendiente de recorrido final con instalador |
 | GitHub Actions del cliente | Ejecución de referencia 1.1.1: pruebas, APK, MSI y empaquetado correctos en [la ejecución de 1bf801d](https://github.com/Matteodf11/chat-app/actions/runs/38452367482) |
 | Capturas y vídeo reales para README/demo | Pendientes; no sustituir por maquetas |
 | Recuperación por correo | Aplazada por decisión del usuario hasta cerrar escritorio |

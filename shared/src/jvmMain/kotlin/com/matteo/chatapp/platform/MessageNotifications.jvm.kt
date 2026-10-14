@@ -1,7 +1,6 @@
 package com.matteo.chatapp.platform
 
 import androidx.compose.runtime.Composable
-import java.awt.EventQueue
 import java.awt.MenuItem
 import java.awt.PopupMenu
 import java.awt.SystemTray
@@ -11,22 +10,13 @@ import javax.imageio.ImageIO
 @Composable
 actual fun PrepareMessageNotifications() = Unit
 
-actual fun clearMessageNotifications() {
-    EventQueue.invokeLater { DesktopMessageNotifications.lastDmId = null }
-}
+actual fun clearMessageNotifications() = Unit
 
-actual fun platformMessageNotificationSink() = MessageNotificationSink { message ->
-    EventQueue.invokeLater {
-        DesktopMessageNotifications.lastDmId = message.dmId
-        DesktopMessageNotifications.trayIcon?.displayMessage(
-            "Chimera · ${message.sender}", message.preview, TrayIcon.MessageType.NONE
-        )
-    }
-}
+// Desktop keeps unread indicators inside Chimera without Windows notifications.
+actual fun platformMessageNotificationSink() = MessageNotificationSink { }
 
 object DesktopMessageNotifications {
-    internal var trayIcon: TrayIcon? = null
-    internal var lastDmId: String? = null
+    private var trayIcon: TrayIcon? = null
 
     fun install(onOpen: () -> Unit, onExit: () -> Unit): Boolean {
         if (!SystemTray.isSupported()) return false
@@ -40,7 +30,6 @@ object DesktopMessageNotifications {
             val icon = TrayIcon(image, "Chimera", menu).apply {
                 isImageAutoSize = true
                 addActionListener {
-                    lastDmId?.let(NotificationNavigation::openDm)
                     onOpen()
                 }
             }
@@ -53,6 +42,5 @@ object DesktopMessageNotifications {
     fun close() {
         trayIcon?.let { SystemTray.getSystemTray().remove(it) }
         trayIcon = null
-        lastDmId = null
     }
 }

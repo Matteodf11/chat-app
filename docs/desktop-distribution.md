@@ -6,7 +6,7 @@ Generar el instalador desde la raíz del proyecto:
 .\gradlew.bat :desktopApp:packageMsi --console=plain
 ```
 
-El archivo resultante es `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.3.msi`.
+El archivo resultante es `desktopApp/build/compose/binaries/main/msi/Chimera-1.1.4.msi`.
 Se puede compartir ese MSI directamente. Incluye el entorno Java necesario;
 el destinatario no necesita instalar Java. Se instala para el usuario actual,
 permite elegir carpeta y añade acceso al menú Inicio y al escritorio.
@@ -50,3 +50,7 @@ La versión 1.1.3 corrige la apertura del selector de foto de perfil, portada e
 icono de servidor en Windows: el diálogo nativo y la lectura se ejecutan fuera
 del contexto de Compose, el selector se libera al cerrarlo y la lectura está
 limitada a 2 MB. Android usa también 1.1.3 y versionCode = 5.
+
+La versión 1.1.4 elimina los avisos externos en Windows. Conserva los indicadores
+internos y la bandeja para abrir y salir de Chimera. Android conserva sus avisos
+locales y usa también 1.1.4, con versionCode = 6.

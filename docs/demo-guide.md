@@ -1,4 +1,4 @@
-# Probar Chimera 1.1.3
+# Probar Chimera 1.1.4
 
 Chimera es un proyecto de portfolio de mensajería para Android y Windows. La demo
 utiliza el backend desplegado en Render y almacenamiento de Supabase. Requiere
@@ -7,8 +7,8 @@ conexión a Internet; el ordenador no necesita instalar Java para usar el MSI.
 ## Instalación
 
 1. Descomprime el paquete de demostración.
-2. En Windows instala `Chimera-1.1.3.msi` y abre Chimera desde Inicio.
-3. En Android instala `Chimera-1.1.3-debug.apk`, permitiendo la instalación desde
+2. En Windows instala `Chimera-1.1.4.msi` y abre Chimera desde Inicio.
+3. En Android instala `Chimera-1.1.4-debug.apk`, permitiendo la instalación desde
    la aplicación desde la que lo abras si Android lo solicita.
 4. Registra una cuenta de demostración y accede. Para probar mensajería entre
    dispositivos usa dos cuentas distintas, una en cada dispositivo.
@@ -55,8 +55,9 @@ no envían nada hasta confirmarlo.
 
 ## Límites que se deben explicar
 
-- Las notificaciones locales dependen de que el proceso y la conexión sigan
-  activos. No existe push garantizado con la app terminada.
+- Windows muestra los mensajes sin leer y menciones dentro de Chimera, sin
+  avisos externos. Las notificaciones locales de Android dependen de que el
+  proceso y la conexión sigan activos. No existe push garantizado con la app terminada.
 - Se usa cifrado de mensajes en el servidor; no se ofrece cifrado de extremo a
   extremo. El backend puede descifrar contenido para devolverlo y buscarlo.
 - «Enviado» confirma el guardado, no la lectura. «Leído» depende del estado de
