@@ -21,7 +21,8 @@ cerrada hasta completar las comprobaciones manuales pendientes.
 | Recuperar borrador y cola pendiente tras reinicio | Pruebas automáticas; recorrido final con dispositivos pendiente |
 | Indicadores internos, ausencia de avisos externos y cierre a bandeja en Windows | Pendiente de recorrido final con instalador |
 | GitHub Actions del cliente | Ejecución de referencia 1.1.1: pruebas, APK, MSI y empaquetado correctos en [la ejecución de 1bf801d](https://github.com/Matteodf11/chat-app/actions/runs/38452367482) |
-| Capturas y vídeo reales para README/demo | Pendientes; no sustituir por maquetas |
+| Capturas reales para README | Cuatro capturas proporcionadas por el usuario e incluidas en docs/images |
+| Vídeo real de la demo | Pendiente |
 | Recuperación por correo | Aplazada por decisión del usuario hasta cerrar escritorio |
 
 ## Recorrido manual final

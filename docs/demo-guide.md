@@ -50,8 +50,8 @@ no envían nada hasta confirmarlo.
 - Abrir la app y probar un mensaje antes de empezar. El servicio gratuito puede
   tardar en responder tras estar inactivo; no presentar ese arranque como una
   medición del rendimiento del cliente.
-- Tener a mano APK/MSI y un vídeo de respaldo grabado con la demo real. Este
-  repositorio no incluye aún capturas o un vídeo verificados.
+- Tener a mano APK/MSI y, cuando esté grabado, un vídeo de respaldo de la demo.
+  El README incluye capturas reales; el vídeo sigue pendiente.
 
 ## Límites que se deben explicar
 
