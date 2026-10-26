@@ -2,6 +2,9 @@
 
 [Volver a la presentación del proyecto](../README.md)
 
+Para estudiar la arquitectura y seguir las funcionalidades de principio a fin,
+consulta la [guía completa de funcionamiento](guia-completa-chimera.md).
+
 ## Arquitectura
 
 El código compartido vive en `shared/src/commonMain/kotlin/com/matteo/chatapp`:

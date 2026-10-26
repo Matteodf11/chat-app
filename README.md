@@ -5,7 +5,7 @@ servidores con canales, menciones y contenido multimedia. Proyecto de portfolio
 construido con **Kotlin Multiplatform y Compose Multiplatform** en el cliente y
 **Java / Spring Boot** en el backend.
 
-[Backend](https://github.com/Matteodf11/chat-backend) · [Guía de demostración](docs/demo-guide.md) · [Desarrollo](docs/development.md)
+[Backend](https://github.com/Matteodf11/chat-backend) · [Guía de demostración](docs/demo-guide.md) · [Desarrollo](docs/development.md) · [Guía rápida](docs/guia-rapida-chimera.md)
 
 <img src="docs/images/chat-windows.png" alt="Chimera en Windows: conversación privada con mensajes, una nota de voz y una fotografía" width="1100">
 
@@ -87,3 +87,6 @@ PC utiliza un mapa en el navegador y se confirma desde la aplicación.
 Consulta los [límites de la demo](docs/demo-guide.md#límites-que-se-deben-explicar)
 y la documentación de [fiabilidad de mensajes](docs/chat-reliability.md),
 [servidores](docs/server-interface.md) y [ubicación](docs/location-sharing.md).
+
+Las precauciones de la demo y el tratamiento de posibles vulnerabilidades están
+en [SECURITY.md](SECURITY.md).
